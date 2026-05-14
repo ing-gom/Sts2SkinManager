@@ -74,6 +74,7 @@ public static class ModFolderJunctionEnforcer
             try
             {
                 CreateJunction(junctionPath, modDir);
+                HideJunction(junctionPath);
                 results.Add(new(modDir, junctionPath, JunctionAction.Created, null));
             }
             catch (Exception ex)
@@ -197,6 +198,22 @@ public static class ModFolderJunctionEnforcer
             return string.Equals(na, nb, StringComparison.OrdinalIgnoreCase);
         }
         catch { return false; }
+    }
+
+    // Hide the junction so Explorer (with default "show hidden = off") keeps mods/ visually clean.
+    // The game framework's Directory.EnumerateDirectories(path) overload still returns hidden
+    // entries — only the EnumerationOptions-bearing overload's defaults skip them.
+    private static void HideJunction(string junctionPath)
+    {
+        try
+        {
+            var attrs = File.GetAttributes(junctionPath);
+            File.SetAttributes(junctionPath, attrs | FileAttributes.Hidden);
+        }
+        catch (Exception ex)
+        {
+            MainFile.Logger.Warn($"could not hide junction {junctionPath}: {ex.Message}");
+        }
     }
 
     private static void CreateJunction(string linkPath, string targetPath)
