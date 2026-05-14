@@ -8,7 +8,7 @@ A Slay the Spire 2 mod that manages installed **character skin mods**, **card sk
 
 ## Features
 
-- **Auto-detection** — scans `<sts2>/mods/*/` and detects three kinds:
+- **Auto-detection** — **recursively** scans `<sts2>/mods/` (so you can group pcks under category folders like `mods/Characters/`, `mods/Artwork/`, `mods/Utility/` and they'll still be picked up) and detects three kinds (`.pck` filenames must be unique across all subfolders — duplicates after the first are skipped with a warning):
   - **Character skin mods** — `.pck` files containing `res://animations/characters/{character}/...` paths
   - **Card skin mods** — `.pck` files overriding `card_art/...` or shipping `card_portraits/`
   - **Mixed mods** — `.pck` files that bundle a character spine with card art / event scenes (e.g. AncientWaifus)
