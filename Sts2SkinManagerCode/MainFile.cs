@@ -51,6 +51,35 @@ public partial class MainFile : Node
         var baseCharacters = SkinModScanner.ScanBaseCharacters(gameDir);
         Logger.Info($"base character roster ({baseCharacters.Count}): [{string.Join(", ", baseCharacters.OrderBy(x => x))}]");
 
+        // Auto-junction: if the user moved a DLL-bundled mod folder into a category subfolder
+        // (e.g. mods/캐릭터/Booba-Necrobinder-Mod/), the game's manifest scan misses it because
+        // the framework only walks direct children of mods/. We create a junction at depth=1
+        // pointing back. Effect lands on the *next* boot — the framework's scan has already run.
+        var junctionResults = ModFolderJunctionEnforcer.Enforce(modsDir);
+        var junctionsCreated = 0;
+        foreach (var r in junctionResults)
+        {
+            switch (r.Action)
+            {
+                case JunctionAction.Created:
+                    Logger.Info($"  [junction+] {r.JunctionPath} → {r.ModFolder}");
+                    junctionsCreated++;
+                    break;
+                case JunctionAction.OrphanRemoved:
+                    Logger.Info($"  [junction-] {r.JunctionPath} (target missing)");
+                    break;
+                case JunctionAction.SkippedConflict:
+                    Logger.Warn($"  [junction!] {r.JunctionPath}: {r.Detail}");
+                    break;
+                case JunctionAction.SkippedDuplicate:
+                    Logger.Warn($"  [junction!] {r.JunctionPath}: {r.Detail}");
+                    break;
+                case JunctionAction.Failed:
+                    Logger.Warn($"  [junction✗] {r.JunctionPath}: {r.Detail}");
+                    break;
+            }
+        }
+
         var detected = SkinModScanner.Scan(modsDir, baseCharacters, out var skippedCustom);
         var characterMods = detected.Where(d => d.Kind == SkinModKind.Character).ToList();
         var cardMods = detected.Where(d => d.Kind == SkinModKind.Cards).ToList();
@@ -105,6 +134,12 @@ public partial class MainFile : Node
         if (fileReordered)
         {
             RestartCountdownModal.ShowOrReset(managerDataDir, 10, "load_order_modal_title", "load_order_modal_body");
+        }
+        // Newly-created junctions miss the current boot's manifest scan. Prompt for restart so the
+        // relocated mods come back online. Suppressed when fileReordered already triggered the modal.
+        else if (junctionsCreated > 0)
+        {
+            RestartCountdownModal.ShowOrReset(managerDataDir, 10, "junction_modal_title", "junction_modal_body");
         }
 
         var choicesPath = Path.Combine(managerDataDir, "skin_choices.json");
