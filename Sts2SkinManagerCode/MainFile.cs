@@ -121,7 +121,22 @@ public partial class MainFile : Node
         // and every Save() mirrors back to the preset path — so re-zipping `mods/` always carries
         // the latest selection forward. Mod-update zips MUST NOT contain modpack_preset.json or
         // they'll overwrite recipient selections.
-        var presetPath = Path.Combine(modsDir, ModId, "modpack_preset.json");
+        var selfDir = Path.GetDirectoryName(typeof(MainFile).Assembly.Location) ?? Path.Combine(modsDir, ModId);
+        var presetPath = Path.Combine(selfDir, "modpack_preset.json");
+        // [NOTE] Migration block — remove from here...
+        // One-time copy from the old hardcoded path (mods/Sts2SkinManager/modpack_preset.json) to
+        // the DLL's actual directory. Needed for users who had their DLL in a non-standard location
+        // (e.g. mods/utils/Sts2SkinManager/) and ran a prior version — the old code always wrote
+        // preset to mods/Sts2SkinManager/ regardless of DLL location. Safe to delete once that
+        // transition period has passed.
+        var legacyPresetPath = Path.Combine(modsDir, ModId, "modpack_preset.json");
+        if (!File.Exists(presetPath) && File.Exists(legacyPresetPath) &&
+            !string.Equals(presetPath, legacyPresetPath, StringComparison.OrdinalIgnoreCase))
+        {
+            try { File.Copy(legacyPresetPath, presetPath); }
+            catch (Exception ex) { Logger.Warn($"preset migrate failed: {ex.Message}"); }
+        }
+        // ...to here. [/NOTE]
         if (!File.Exists(choicesPath) && File.Exists(presetPath))
         {
             try
