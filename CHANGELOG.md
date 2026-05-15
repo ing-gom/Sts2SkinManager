@@ -4,6 +4,11 @@ All notable changes to Sts2SkinManager are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.6] - 2026-05-15
+
+### Fixed
+- **`modpack_preset.json` now resolves relative to the DLL location.** Previously the preset path was hardcoded to `mods/Sts2SkinManager/`, ignoring where the DLL was actually loaded from. Users with the mod installed under a subdirectory (e.g. `mods/utils/Sts2SkinManager/`) would have their preset written to the wrong location, and `SkinChoicesConfig.Save()`'s `Directory.CreateDirectory` mirror branch would silently create a phantom `mods/Sts2SkinManager/` folder as a side-effect. The path is now derived from `typeof(MainFile).Assembly.Location` so nested installs work correctly. A one-time migration block copies any existing preset from the legacy hardcoded path to the new DLL-relative path on first boot; the block is marked with `[NOTE] Migration block` in `MainFile.cs` and can be removed in a future release. Thanks to [@skay138](https://github.com/skay138) for the fix ([#6](https://github.com/ing-gom/Sts2SkinManager/pull/6)).
+
 ## [0.11.5] - 2026-05-15
 
 ### Fixed
