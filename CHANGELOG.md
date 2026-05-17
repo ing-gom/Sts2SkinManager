@@ -4,6 +4,12 @@ All notable changes to Sts2SkinManager are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.8] - 2026-05-17
+
+### Fixed — card-art mods with non-standard asset paths are now detected
+- **Card-art mods that store portraits under arbitrary directory prefixes are now recognised as card skins.** The previous `CardArtBaseOverrideRegex` required the literal `card_art/` segment immediately before the base-game card namespace, which matched RegentCardsAnimeRework (`card_art/MegaCrit.Sts2.Core.Models.Cards.X_card_art.png`) but missed mods that store their portraits elsewhere — most visibly `TheDefectCardArtMod`, which uses `assets/images/cards/MegaCrit.Sts2.Core.Models.Cards.X_portrait.png` and a Harmony-driven DLL to redirect portrait lookups. Those mods fell through both classification branches (no `animations/characters/{base}/`, no path matching the strict regex) so the scanner never added them to its result and the manager UI never showed them; users had no way to toggle them. The regex is now loosened to match the namespace `MegaCrit.Sts2.Core.Models.Cards.` anywhere in the pck — the namespace is specific enough to base-game cards that any pck mentioning it is overriding card visuals.
+- **DLL suggester no longer mis-classifies card-art mods as base-character skins.** Card-art mods like `TheDefectCardArtMod` ship a DLL containing every base-game card class name (e.g. `MegaCrit.Sts2.Core.Models.Cards.AdaptiveStrike`) as string literals for redirect targets. The v0.11.0–.4 byte-frequency suggester would see the heavy concentration of `Defect`-prefixed card names and auto-assign the mod as a defect character skin — which would then DLL-block the mod whenever the user picked any other defect skin. With the scanner fix above, these mods now classify as `SkinModKind.Cards` via the pck pass and land in `alreadyDetectedModIds`, so the suggester's `alreadyDetected.Contains` short-circuit at `DllSkinDetectionService.cs:88` skips them naturally. No separate guard code was needed.
+
 ## [0.11.7] - 2026-05-17
 
 ### Fixed — defense-in-depth against DLL-skin false positives

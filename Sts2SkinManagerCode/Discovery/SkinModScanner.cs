@@ -24,11 +24,18 @@ public static class SkinModScanner
         RegexOptions.IgnoreCase | RegexOptions.Compiled
     );
 
+    // Any reference to the base-game card class namespace anywhere in the pck — either as an
+    // asset path (`card_art/MegaCrit.Sts2.Core.Models.Cards.X_card_art.png` — RegentCardsAnimeRework,
+    // `assets/images/cards/MegaCrit.Sts2.Core.Models.Cards.X_portrait.png` — TheDefectCardArtMod)
+    // or as a `cardId` reference in an embedded scene/JSON. The namespace itself is specific enough
+    // to base-game cards that any pck mentioning it is overriding card visuals.
     private static readonly Regex CardArtBaseOverrideRegex = new(
-        @"card_art/MegaCrit\.Sts2\.Core\.Models\.Cards\.",
+        @"MegaCrit\.Sts2\.Core\.Models\.Cards\.",
         RegexOptions.IgnoreCase | RegexOptions.Compiled
     );
 
+    // Mods that define their own card namespace and rely on a Harmony DLL to redirect portrait
+    // lookups (RegentFemPortraits pattern). The literal `/card_portraits/` segment is the marker.
     private static readonly Regex CardPortraitsNamespaceRegex = new(
         @"/card_portraits/",
         RegexOptions.IgnoreCase | RegexOptions.Compiled
