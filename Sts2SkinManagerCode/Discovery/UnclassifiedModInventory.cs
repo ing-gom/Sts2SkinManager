@@ -34,12 +34,18 @@ public static class UnclassifiedModInventory
         IReadOnlyCollection<string> alreadyDetectedModIds,
         IReadOnlyCollection<string> harmonySuspectModIds,
         IReadOnlyCollection<string> assignedModIds,
-        IReadOnlyCollection<string> skippedModIds)
+        IReadOnlyCollection<string> skippedModIds,
+        IReadOnlyCollection<string> customCharacterModIds)
     {
         var detected = new HashSet<string>(alreadyDetectedModIds, StringComparer.OrdinalIgnoreCase);
         var suspects = new HashSet<string>(harmonySuspectModIds, StringComparer.OrdinalIgnoreCase);
         var assigned = new HashSet<string>(assignedModIds, StringComparer.OrdinalIgnoreCase);
         var skipped = new HashSet<string>(skippedModIds, StringComparer.OrdinalIgnoreCase);
+        // customCharacterMods = mods the pck scanner skipped because they add a brand-new
+        // character (either `animations/characters/{non_base}/` or CustomCharacter indicator
+        // strings). Their auto-mount is intentionally left intact; surfacing them again here
+        // would be a duplicate report (e.g. BaseLib, Watcher).
+        var customCharacters = new HashSet<string>(customCharacterModIds, StringComparer.OrdinalIgnoreCase);
 
         var result = new List<UnclassifiedMod>();
         if (!Directory.Exists(modsDir)) return result;
@@ -58,6 +64,7 @@ public static class UnclassifiedModInventory
             if (detected.Contains(modId)) continue;
             if (assigned.Contains(modId)) continue;
             if (skipped.Contains(modId)) continue;
+            if (customCharacters.Contains(modId)) continue;
             // If Harmony inspector already flagged it, it'll be handled by DllSkinDetectionService.
             // Avoid double-reporting.
             if (suspects.Contains(modId)) continue;
@@ -67,14 +74,9 @@ public static class UnclassifiedModInventory
             {
                 try
                 {
-                    var paths = PckPathReader.ReadAsciiRuns(pckPath);
-                    foreach (var p in paths)
-                    {
-                        if (System.Text.RegularExpressions.Regex.IsMatch(p, @"animations/characters/[a-z_][a-z0-9_]*/", System.Text.RegularExpressions.RegexOptions.IgnoreCase))
-                            pckChars++;
-                        if (System.Text.RegularExpressions.Regex.IsMatch(p, @"card_art/MegaCrit\.Sts2\.Core\.Models\.Cards\.|/card_portraits/", System.Text.RegularExpressions.RegexOptions.IgnoreCase))
-                            pckCards++;
-                    }
+                    var scan = AssetDomainCatalog.ScanPaths(PckPathReader.ReadAsciiRuns(pckPath));
+                    pckChars = scan.CharacterSpineHits;
+                    pckCards = scan.CardArtHits + scan.CardPortraitsHits;
                 }
                 catch { }
             }

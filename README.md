@@ -74,6 +74,27 @@ If a mod referenced by the preset isn't installed on the recipient's machine, th
 - First install needs one extra restart (load-order self-bootstrap).
 - Encrypted `.pck` files aren't supported.
 
+## Reporting issues
+
+If a skin or card mod isn't being detected, is being mis-classified, or behaves oddly, **please attach your boot log when reporting**. The log contains a per-mod classification line showing exactly which asset domains the manager saw, which usually pinpoints the root cause without guesswork.
+
+**Where the log lives** — `<user_data>/SlayTheSpire2/logs/godot.log` (typically `%APPDATA%\SlayTheSpire2\logs\godot.log` on Windows). Each boot rotates a timestamped backup into the same folder; the freshest is always `godot.log`.
+
+**What to look for** — search for lines tagged `[Sts2SkinManager]`. The detection block looks like:
+
+```
+[Sts2SkinManager] base character roster (5): [defect, ironclad, necrobinder, regent, silent]
+[Sts2SkinManager] detected 9 character skin pck(s), 1 card pack pck(s):
+[Sts2SkinManager]   [char] MyCharSkin → [defect] spine:42 char_select:7
+[Sts2SkinManager]   [cards] MyCardMod (mixed) char_select:12 card_art:73
+[Sts2SkinManager] 1 mixed mod(s) — touch both character and card asset domains:
+[Sts2SkinManager]   [mixed] MyCardMod char_select:12 card_art:73 (mounted as cards)
+[Sts2SkinManager] skipped 2 custom-character mod(s):
+[Sts2SkinManager]   [skip] CustomChar → [] card_portraits:184 custom_char:30
+```
+
+Paste this block (with a few lines before/after if relevant) into your report on [GitHub issues](https://github.com/ing-gom/Sts2SkinManager/issues) or in the Nexus comments. The labels `spine:N` / `char_select:N` / `card_art:N` / `card_portraits:N` / `custom_char:N` show which asset patterns the scanner matched.
+
 ## License
 
 MIT.

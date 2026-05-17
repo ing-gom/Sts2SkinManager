@@ -160,7 +160,7 @@ public static class DllSkinDetectionService
         var harmonySuspectIds = suspects.Select(s => s.ModId).ToList();
         var unclassified = UnclassifiedModInventory.Build(
             modsDir, baseCharacters, alreadyDetected, harmonySuspectIds,
-            choices.DllSkinAssignments.Keys, choices.DllSkinSkipped);
+            choices.DllSkinAssignments.Keys, choices.DllSkinSkipped, customCharacterMods);
         if (unclassified.Count > 0)
         {
             MainFile.Logger.Info($"dll-skin forensic: {unclassified.Count} mod(s) with DLL+pck but no recognized skin signal:");

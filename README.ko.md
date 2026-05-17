@@ -74,6 +74,27 @@ Save 할 때마다 Sts2SkinManager 가 `<sts2>/mods/Sts2SkinManager/modpack_pres
 - 첫 설치 시 추가 재시작 1회 필요 (load-order self-bootstrap).
 - 암호화된 `.pck` 는 미지원.
 
+## 이슈 제보
+
+스킨/카드 mod 가 인식이 안 되거나, 잘못 분류되거나, 그 외 이상한 동작을 발견하시면 **이슈 제보 시 부팅 로그를 함께 첨부해주세요**. 로그에 각 mod 별 분류 라인이 찍히는데, 매니저가 어떤 asset 도메인을 매치했는지가 그대로 노출되므로 원인 파악이 훨씬 빠릅니다.
+
+**로그 위치** — `<user_data>/SlayTheSpire2/logs/godot.log` (Windows 기본: `%APPDATA%\SlayTheSpire2\logs\godot.log`). 매 부팅마다 타임스탬프 백업이 같은 폴더에 생기고, 최신본은 항상 `godot.log`.
+
+**찾을 곳** — `[Sts2SkinManager]` 태그가 붙은 라인. 감지 블록은 이렇게 생겼어요:
+
+```
+[Sts2SkinManager] base character roster (5): [defect, ironclad, necrobinder, regent, silent]
+[Sts2SkinManager] detected 9 character skin pck(s), 1 card pack pck(s):
+[Sts2SkinManager]   [char] MyCharSkin → [defect] spine:42 char_select:7
+[Sts2SkinManager]   [cards] MyCardMod (mixed) char_select:12 card_art:73
+[Sts2SkinManager] 1 mixed mod(s) — touch both character and card asset domains:
+[Sts2SkinManager]   [mixed] MyCardMod char_select:12 card_art:73 (mounted as cards)
+[Sts2SkinManager] skipped 2 custom-character mod(s):
+[Sts2SkinManager]   [skip] CustomChar → [] card_portraits:184 custom_char:30
+```
+
+이 블록을 (필요시 앞뒤 몇 줄과 함께) [GitHub issues](https://github.com/ing-gom/Sts2SkinManager/issues) 또는 Nexus 댓글에 첨부해주시면 됩니다. 라벨 `spine:N` / `char_select:N` / `card_art:N` / `card_portraits:N` / `custom_char:N` 은 스캐너가 어떤 asset 패턴을 매치했는지를 보여줍니다.
+
 ## 라이선스
 
 MIT.

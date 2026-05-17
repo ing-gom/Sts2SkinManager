@@ -4,6 +4,19 @@ All notable changes to Sts2SkinManager are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.9] - 2026-05-17
+
+### Added — single-source asset catalog + richer per-mod diagnostics
+- **All pck path-pattern recognition now lives in `Discovery/AssetDomainCatalog.cs`.** Previously, `SkinModScanner` and `UnclassifiedModInventory` each defined their own copies of the character-spine / card-art / card-portraits regex literals — drift was already starting (UnclassifiedModInventory still required the strict `card_art/` prefix even after v0.11.8 generalised it in SkinModScanner). The catalog exposes a single `ScanPaths()` method returning a `PathScan` record with per-domain hit counts; both consumers now read from it.
+- **Per-mod boot log now shows which asset domains were detected.** Each `[char] / [cards] / [skip]` line ends with a compact label like `spine:42 char_select:7 card_art:71 card_portraits:0 custom_char:2` — only non-zero domains appear. Users can now self-diagnose mis-classifications by reading the boot log instead of grepping pck bytes.
+- **New `CustomCharacter` indicator domain.** Matches BaseLib-style custom-character signals: `Code/Character/` paths, `CustomCharacterModel` class name, `characters.json` registration manifest. Used by the scanner to skip Watcher-style mods that pack their cards under a private namespace (e.g. `res://Watcher/images/card_portraits/`) but ship a brand-new character — previously those misclassified as base-card portrait redirects (RegentFemPortraits-style) and surfaced in the card-skin panel, where the user could accidentally disable them.
+- **New `CharSelectAsset` indicator domain.** Matches `char_select_X.*` files and `animations/character_select/` paths. Doesn't change classification on its own (a mod touching only char-select assets without spine still falls through) but enables the broader mixed-detection rule below.
+- **Broadened mixed-mod detection.** Cards-kind mods that also touch character-select assets are now flagged `IsMixed = true` — e.g. `TheDefectCardArtMod` overrides `char_select_bg_defect.tscn` alongside its card portraits. Mount routing is unchanged (still mod_list toggle via `CardPackApplier`); the flag is purely diagnostic.
+- **Dedicated `[mixed]` log section.** After the main `[char]` / `[cards]` listing, a new block enumerates every mod with `IsMixed = true` regardless of Kind, with a `(mounted as char|cards)` tag — helps users spot mods most likely to visually conflict with character skins targeting the same base character.
+
+### Fixed
+- **Skipped custom-character mods no longer double-report in the forensic forensic log.** `BaseLib`, `Watcher`, etc. were appearing both under `[skip]` (correctly classified as custom-character pattern) and `[unclassified]` (the dll-skin forensic forensic pass didn't know they were already handled). `UnclassifiedModInventory.Build()` now takes the `customCharacterModIds` set and filters them out.
+
 ## [0.11.8] - 2026-05-17
 
 ### Fixed — card-art mods with non-standard asset paths are now detected

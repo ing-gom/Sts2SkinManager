@@ -1,7 +1,6 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Text.RegularExpressions;
 
 namespace Sts2SkinManager.Discovery;
 
@@ -14,33 +13,12 @@ public record DetectedSkinMod(
     SkinModKind Kind,
     IReadOnlyList<string> Characters,
     string? PreviewPath,
-    bool IsMixed = false
+    bool IsMixed = false,
+    string? DomainsLabel = null
 );
 
 public static class SkinModScanner
 {
-    private static readonly Regex CharacterPathRegex = new(
-        @"animations/characters/([a-z_][a-z0-9_]*)/",
-        RegexOptions.IgnoreCase | RegexOptions.Compiled
-    );
-
-    // Any reference to the base-game card class namespace anywhere in the pck — either as an
-    // asset path (`card_art/MegaCrit.Sts2.Core.Models.Cards.X_card_art.png` — RegentCardsAnimeRework,
-    // `assets/images/cards/MegaCrit.Sts2.Core.Models.Cards.X_portrait.png` — TheDefectCardArtMod)
-    // or as a `cardId` reference in an embedded scene/JSON. The namespace itself is specific enough
-    // to base-game cards that any pck mentioning it is overriding card visuals.
-    private static readonly Regex CardArtBaseOverrideRegex = new(
-        @"MegaCrit\.Sts2\.Core\.Models\.Cards\.",
-        RegexOptions.IgnoreCase | RegexOptions.Compiled
-    );
-
-    // Mods that define their own card namespace and rely on a Harmony DLL to redirect portrait
-    // lookups (RegentFemPortraits pattern). The literal `/card_portraits/` segment is the marker.
-    private static readonly Regex CardPortraitsNamespaceRegex = new(
-        @"/card_portraits/",
-        RegexOptions.IgnoreCase | RegexOptions.Compiled
-    );
-
     // Reads `animations/characters/{char}/` from the base game pck so we can tell
     // "skin for an existing character" apart from "mod that adds a brand-new character".
     // Touching only the raw bytes here keeps us clear of ModelDb.AllCharacters caching/Harmony timing.
@@ -49,11 +27,8 @@ public static class SkinModScanner
         var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var basePck = Path.Combine(gameDir, "SlayTheSpire2.pck");
         if (!File.Exists(basePck)) return result;
-        foreach (var p in PckPathReader.ReadAsciiRuns(basePck))
-        {
-            var m = CharacterPathRegex.Match(p);
-            if (m.Success) result.Add(m.Groups[1].Value.ToLowerInvariant());
-        }
+        var scan = AssetDomainCatalog.ScanPaths(PckPathReader.ReadAsciiRuns(basePck));
+        foreach (var c in scan.Characters) result.Add(c);
         return result;
     }
 
@@ -68,7 +43,7 @@ public static class SkinModScanner
     private static bool ShouldSkipDir(string dirName) =>
         dirName.StartsWith(".") || string.Equals(dirName, "__MACOSX", StringComparison.OrdinalIgnoreCase);
 
-    public record SkippedCustomCharacterMod(string ModId, IReadOnlyList<string> CharacterIds);
+    public record SkippedCustomCharacterMod(string ModId, IReadOnlyList<string> CharacterIds, string? DomainsLabel = null);
 
     public static List<DetectedSkinMod> Scan(
         string modsDir,
@@ -89,18 +64,10 @@ public static class SkinModScanner
             var modDir = Path.GetDirectoryName(pck)!;
             var previewPath = FindPreview(modDir);
 
-            var paths = PckPathReader.ReadAsciiRuns(pck);
-            var chars = new HashSet<string>();
-            var isCardMod = false;
-            foreach (var p in paths)
-            {
-                var m = CharacterPathRegex.Match(p);
-                if (m.Success) chars.Add(m.Groups[1].Value.ToLowerInvariant());
-                if (!isCardMod && (CardArtBaseOverrideRegex.IsMatch(p) || CardPortraitsNamespaceRegex.IsMatch(p)))
-                {
-                    isCardMod = true;
-                }
-            }
+            var scan = AssetDomainCatalog.ScanPaths(PckPathReader.ReadAsciiRuns(pck));
+            var chars = scan.Characters;
+            var isCardMod = scan.IsCardMod;
+            var domainsLabel = scan.ToLabel();
 
             var pckId = Path.GetFileNameWithoutExtension(pck);
             // ModId is the pck filename — same name in different subfolders would collide silently.
@@ -132,7 +99,7 @@ public static class SkinModScanner
                 else if (baseCharacters.Count == 0 || baseCharacters.Contains(assignedChar))
                 {
                     result.Add(new DetectedSkinMod(pckId, modDir, pck, SkinModKind.Character,
-                        new List<string> { assignedChar.ToLowerInvariant() }, previewPath));
+                        new List<string> { assignedChar.ToLowerInvariant() }, previewPath, IsMixed: false, DomainsLabel: domainsLabel));
                     continue;
                 }
                 else
@@ -152,7 +119,7 @@ public static class SkinModScanner
                     : chars.Where(c => baseCharacters.Contains(c)).ToHashSet();
                 if (baseHits.Count == 0)
                 {
-                    skippedCustomCharacterMods.Add(new SkippedCustomCharacterMod(pckId, chars.ToList()));
+                    skippedCustomCharacterMods.Add(new SkippedCustomCharacterMod(pckId, chars.ToList(), domainsLabel));
                     continue;
                 }
                 // A mod that ships BOTH a base-character spine AND card_art/card_portraits is a "mixed"
@@ -160,11 +127,29 @@ public static class SkinModScanner
                 // dropdown as main spine) but is also flagged IsMixed so the mixed-addon panel can
                 // toggle it independently as a non-main mount.
                 var isMixed = isCardMod;
-                result.Add(new DetectedSkinMod(pckId, modDir, pck, SkinModKind.Character, baseHits.ToList(), previewPath, isMixed));
+                result.Add(new DetectedSkinMod(pckId, modDir, pck, SkinModKind.Character, baseHits.ToList(), previewPath, isMixed, domainsLabel));
+            }
+            else if (scan.IsCustomCharacterMod)
+            {
+                // BaseLib-style custom-character mod that packs spine under a non-standard path
+                // (no `animations/characters/{X}/`) but ships C# code under `Code/Character/`,
+                // references `CustomCharacterModel`, or carries a `characters.json` registration
+                // manifest. The Watcher STS1→STS2 port is the canonical case — its 184 portraits
+                // under `Watcher/images/card_portraits/` would otherwise misclassify it as a
+                // base-card portrait redirect (RegentFemPortraits-style) and surface it in the
+                // card-skin panel, where the user could accidentally disable it. Skip from
+                // classification so the game's normal mod loader keeps it mounted.
+                skippedCustomCharacterMods.Add(new SkippedCustomCharacterMod(pckId, new List<string>(), domainsLabel));
             }
             else if (isCardMod)
             {
-                result.Add(new DetectedSkinMod(pckId, modDir, pck, SkinModKind.Cards, new List<string>(), previewPath));
+                // A card mod that ALSO touches character-select assets (e.g. TheDefectCardArtMod
+                // restyles `char_select_bg_defect.tscn` alongside its card portraits) is flagged
+                // mixed for visibility — same kind=Cards mount routing (mod_list toggle with
+                // priority), but surfaces in the [mixed] log section so the user knows the mod
+                // may visually conflict with a character skin targeting the same base character.
+                var isMixed = scan.HasCharSelectAsset;
+                result.Add(new DetectedSkinMod(pckId, modDir, pck, SkinModKind.Cards, new List<string>(), previewPath, isMixed, domainsLabel));
             }
         }
         return result;

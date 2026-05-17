@@ -53,6 +53,14 @@ Any character skin mod that overrides paths under [color=#ffcc00]res://animation
 [*] Encrypted [color=#ffcc00].pck[/color] files aren't supported.
 [/list]
 
+[size=4][b]Reporting issues[/b][/size]
+
+If a skin or card mod isn't being detected or is mis-classified, [b]please attach your boot log when reporting[/b]. The log contains a per-mod classification line showing exactly which asset domains the manager saw, which makes diagnosis much faster.
+
+[b]Log location[/b] — [color=#ffcc00]<user_data>/SlayTheSpire2/logs/godot.log[/color] (typically [color=#ffcc00]%APPDATA%\SlayTheSpire2\logs\godot.log[/color] on Windows). Each boot creates a timestamped backup in the same folder; the latest is always [color=#ffcc00]godot.log[/color].
+
+[b]What to look for[/b] — search for lines tagged [color=#ffcc00][Sts2SkinManager][/color]. The detection block lists every mod with the asset domains it matched: [color=#ffcc00]spine[/color], [color=#ffcc00]char_select[/color], [color=#ffcc00]card_art[/color], [color=#ffcc00]card_portraits[/color], [color=#ffcc00]custom_char[/color]. Paste this block (with a few surrounding lines) into your report on [url=https://github.com/ing-gom/Sts2SkinManager/issues]GitHub issues[/url] or in the Nexus comments.
+
 [size=4][b]Source code[/b][/size]
 
 GitHub: [url=https://github.com/ing-gom/Sts2SkinManager]https://github.com/ing-gom/Sts2SkinManager[/url]

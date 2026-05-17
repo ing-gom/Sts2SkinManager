@@ -64,18 +64,38 @@ public partial class MainFile : Node
         if (skippedCustom.Count > 0)
         {
             Logger.Info($"skipped {skippedCustom.Count} custom-character mod(s) — not in base roster, leaving auto-mount intact:");
-            foreach (var s in skippedCustom) Logger.Info($"  [skip] {s.ModId} → [{string.Join(",", s.CharacterIds)}]");
+            foreach (var s in skippedCustom) Logger.Info($"  [skip] {s.ModId} → [{string.Join(",", s.CharacterIds)}] {s.DomainsLabel}");
         }
 
         Logger.Info($"detected {characterMods.Count} character skin pck(s), {cardMods.Count} card pack pck(s):");
         foreach (var d in characterMods)
         {
             ManagedPckRegistry.Manage(d.PckPath);
-            Logger.Info($"  [char] {d.ModId} → [{string.Join(",", d.Characters)}]");
+            var mixedTag = d.IsMixed ? " (mixed)" : "";
+            Logger.Info($"  [char] {d.ModId} → [{string.Join(",", d.Characters)}]{mixedTag} {d.DomainsLabel}");
         }
         foreach (var d in cardMods)
         {
-            Logger.Info($"  [cards] {d.ModId}");
+            var mixedTag = d.IsMixed ? " (mixed)" : "";
+            Logger.Info($"  [cards] {d.ModId}{mixedTag} {d.DomainsLabel}");
+        }
+
+        // Dedicated mixed-domain summary — collects every IsMixed mod across both Kinds so the
+        // user can spot cross-domain mods at a glance. Mount routing is unchanged (each mod
+        // still mounts per its Kind); this block is purely diagnostic visibility. A "mixed" mod
+        // is one that touches both character-related (spine or char_select) AND card-related
+        // (card_art or card_portraits) assets — these are most likely to visually conflict with
+        // other mods targeting the same character.
+        var mixedAll = detected.Where(d => d.IsMixed).ToList();
+        if (mixedAll.Count > 0)
+        {
+            Logger.Info($"{mixedAll.Count} mixed mod(s) — touch both character and card asset domains:");
+            foreach (var d in mixedAll)
+            {
+                var kind = d.Kind == SkinModKind.Character ? "char" : "cards";
+                var charsTag = d.Characters.Count > 0 ? $" → [{string.Join(",", d.Characters)}]" : "";
+                Logger.Info($"  [mixed] {d.ModId}{charsTag} {d.DomainsLabel} (mounted as {kind})");
+            }
         }
 
         var byCharacter = new Dictionary<string, List<DetectedSkinMod>>();
