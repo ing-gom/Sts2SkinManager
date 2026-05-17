@@ -4,6 +4,13 @@ All notable changes to Sts2SkinManager are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.7] - 2026-05-17
+
+### Fixed — defense-in-depth against DLL-skin false positives
+- **Custom-character mods are now suppressed from byte-frequency auto-suggestion.** v0.11.0–.4 introduced a dual-encoding byte-pattern suggester so DLL-driven character skins (e.g. `Hcxmmx_Touhou_Sakuya_Skin`) could be auto-detected and DLL-blocked while inactive. The suggester has a known failure mode on STS1→STS2 ports: when a mod adds a brand-new character but its DLL references base-game asset paths (e.g. reusing Necrobinder SFX events for stage hooks), the suggester mis-attributes those references to a base character and writes a `_dll_skin_assignments` entry. The next boot's v0.7.0 DLL block then strands the custom character whenever the user picks "default" or any other skin for that base. The detection service now receives the list of custom-character mods identified by the pck scanner (`animations/characters/{non_base}/` paths) and short-circuits before suggesting for any of them.
+- **Stale `_dll_skin_assignments` entries are self-healed on next boot.** If `skin_choices.json` already contains a false-positive assignment from a prior session, the pck scanner now detects the contradiction (assignment points to a base character, but the pck adds non-base characters) and ignores the entry with a one-line warning explaining how to remove it manually. Without this, users hit by the v0.11.0–.4 mis-classification would have to edit JSON by hand to recover.
+- **Skip log format clarified.** The "skipped custom-character mod" startup log now prints `{modId} → [chars]` instead of a pre-formatted string, so the list of detected character ids is always visible (useful when diagnosing whether a mod was correctly classified as custom-character or not).
+
 ## [0.11.6] - 2026-05-15
 
 ### Fixed

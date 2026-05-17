@@ -64,7 +64,7 @@ public partial class MainFile : Node
         if (skippedCustom.Count > 0)
         {
             Logger.Info($"skipped {skippedCustom.Count} custom-character mod(s) — not in base roster, leaving auto-mount intact:");
-            foreach (var s in skippedCustom) Logger.Info($"  [skip] {s}");
+            foreach (var s in skippedCustom) Logger.Info($"  [skip] {s.ModId} → [{string.Join(",", s.CharacterIds)}]");
         }
 
         Logger.Info($"detected {characterMods.Count} character skin pck(s), {cardMods.Count} card pack pck(s):");
@@ -254,7 +254,16 @@ public partial class MainFile : Node
             // a base character via byte-frequency, writes assignments to skin_choices.json, then
             // shows a single restart modal so v0.7.0 DLL block can take effect on next boot.
             var alreadyDetectedIds = detected.Select(d => d.ModId).ToList();
-            DllSkinDetectionService.ScheduleAfter(tree, modsDir, choicesPath, managerDataDir, baseCharacters, alreadyDetectedIds);
+            // Pck-scanner found `animations/characters/{non_base}/` for these — they're custom-
+            // character mods. Their DLLs may patch CharacterModel (abstract) for the new
+            // character's spine setup, and may reference base-game audio/asset paths (e.g. STS1
+            // ports that reuse Necrobinder SFX events). The byte-frequency suggester would
+            // mis-attribute those references to a base character and auto-assign the mod as
+            // that character's skin — which then strands the custom character via DLL-block
+            // whenever the user picks "default" or another skin. Pass them through so the
+            // detection service short-circuits before suggesting.
+            var customCharacterIds = skippedCustom.Select(s => s.ModId).ToList();
+            DllSkinDetectionService.ScheduleAfter(tree, modsDir, choicesPath, managerDataDir, baseCharacters, alreadyDetectedIds, customCharacterIds);
         }
     }
 

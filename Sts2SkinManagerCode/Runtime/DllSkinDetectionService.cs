@@ -25,18 +25,24 @@ public static class DllSkinDetectionService
         string choicesPath,
         string managerDataDir,
         IReadOnlySet<string> baseCharacters,
-        IReadOnlyCollection<string> alreadyDetectedModIds)
+        IReadOnlyCollection<string> alreadyDetectedModIds,
+        IReadOnlyCollection<string> customCharacterModIds)
     {
         // alreadyDetectedModIds = pck-based scanner already classified these (character or card),
         // so skip them entirely from the Harmony inspection pass.
         var alreadyDetected = new HashSet<string>(alreadyDetectedModIds, StringComparer.OrdinalIgnoreCase);
+        // customCharacterModIds = pck has animations/characters/{non_base}/ — this is a mod that
+        // adds a brand-new character. Its DLL may reference base-game audio/asset paths (e.g.
+        // STS1→STS2 ports reusing Necrobinder SFX events), which would otherwise trick the
+        // byte-frequency suggester into mis-classifying the mod as that base character's skin.
+        var customCharacterMods = new HashSet<string>(customCharacterModIds, StringComparer.OrdinalIgnoreCase);
 
         try
         {
             var timer = tree.CreateTimer(DetectionDelaySeconds);
             timer.Timeout += () =>
             {
-                try { Run(modsDir, choicesPath, managerDataDir, baseCharacters, alreadyDetected); }
+                try { Run(modsDir, choicesPath, managerDataDir, baseCharacters, alreadyDetected, customCharacterMods); }
                 catch (Exception ex) { MainFile.Logger.Warn($"dll skin detection failed: {ex.Message}"); }
             };
         }
@@ -51,7 +57,8 @@ public static class DllSkinDetectionService
         string choicesPath,
         string managerDataDir,
         IReadOnlySet<string> baseCharacters,
-        HashSet<string> alreadyDetected)
+        HashSet<string> alreadyDetected,
+        HashSet<string> customCharacterMods)
     {
         var assemblyToModId = HarmonyPatchInspector.BuildAssemblyToModIdMap(modsDir);
         var suspects = HarmonyPatchInspector.Inspect(assemblyToModId);
@@ -81,6 +88,15 @@ public static class DllSkinDetectionService
             if (alreadyDetected.Contains(suspect.ModId)) continue;
             if (choices.DllSkinAssignments.ContainsKey(suspect.ModId)) continue;
             if (choices.DllSkinSkipped.Contains(suspect.ModId)) continue;
+            if (customCharacterMods.Contains(suspect.ModId))
+            {
+                // Custom-character mod whose DLL incidentally patches CharacterModel (for the new
+                // character's spine setup) and references base-game asset paths. Refuse to suggest
+                // — assigning it as a base skin would DLL-block it and the custom character would
+                // disappear whenever the user picks "default" or any other skin for that base.
+                MainFile.Logger.Info($"dll-skin: suppressing auto-suggest for custom-character mod '{suspect.ModId}' (patched [{string.Join(", ", suspect.PatchedTargets)}]). Its pck adds a non-base character; the byte-frequency suggester would mis-attribute references to a base character.");
+                continue;
+            }
 
             // Find the mod folder. assemblyToModId maps name→folderId but we still need the path
             // to read pck/dll bytes. Walk the mods tree once to find the matching folder.

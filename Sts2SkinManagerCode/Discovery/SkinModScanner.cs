@@ -61,14 +61,16 @@ public static class SkinModScanner
     private static bool ShouldSkipDir(string dirName) =>
         dirName.StartsWith(".") || string.Equals(dirName, "__MACOSX", StringComparison.OrdinalIgnoreCase);
 
+    public record SkippedCustomCharacterMod(string ModId, IReadOnlyList<string> CharacterIds);
+
     public static List<DetectedSkinMod> Scan(
         string modsDir,
         IReadOnlySet<string> baseCharacters,
-        out List<string> skippedCustomCharacterMods,
+        out List<SkippedCustomCharacterMod> skippedCustomCharacterMods,
         IReadOnlyDictionary<string, string>? dllSkinAssignments = null)
     {
         var result = new List<DetectedSkinMod>();
-        skippedCustomCharacterMods = new List<string>();
+        skippedCustomCharacterMods = new List<SkippedCustomCharacterMod>();
         if (!Directory.Exists(modsDir)) return result;
 
         // Recursive walk so users can group pcks under category folders (e.g. mods/캐릭터/, mods/아트워크/).
@@ -110,13 +112,26 @@ public static class SkinModScanner
             // and dropdown selection apply uniformly.
             if (dllSkinAssignments != null && dllSkinAssignments.TryGetValue(pckId, out var assignedChar))
             {
-                if (baseCharacters.Count == 0 || baseCharacters.Contains(assignedChar))
+                // Auto-heal: if the pck has non-base character paths, the mod adds a brand-new
+                // character. An auto-suggester false positive (e.g. STS1→STS2 ports reusing
+                // Necrobinder SFX events trick the byte-frequency suggester) wrote this
+                // assignment in a prior session; honoring it would DLL-block the custom character
+                // whenever the user picks "default" for the base. Ignore and fall through to the
+                // chars-based skip path, leaving auto-mount intact.
+                if (baseCharacters.Count > 0 && chars.Any(c => !baseCharacters.Contains(c)))
+                {
+                    MainFile.Logger.Warn($"dll skin assignment '{pckId}' → '{assignedChar}' contradicts pck signature [{string.Join(",", chars)}] (pck adds non-base character). Ignoring assignment; treating as custom-character mod. Remove the entry from _dll_skin_assignments in skin_choices.json to silence this warning.");
+                }
+                else if (baseCharacters.Count == 0 || baseCharacters.Contains(assignedChar))
                 {
                     result.Add(new DetectedSkinMod(pckId, modDir, pck, SkinModKind.Character,
                         new List<string> { assignedChar.ToLowerInvariant() }, previewPath));
                     continue;
                 }
-                MainFile.Logger.Warn($"dll skin assignment '{pckId}' → '{assignedChar}' references unknown base character; ignoring.");
+                else
+                {
+                    MainFile.Logger.Warn($"dll skin assignment '{pckId}' → '{assignedChar}' references unknown base character; ignoring.");
+                }
             }
 
             if (chars.Count > 0)
@@ -130,7 +145,7 @@ public static class SkinModScanner
                     : chars.Where(c => baseCharacters.Contains(c)).ToHashSet();
                 if (baseHits.Count == 0)
                 {
-                    skippedCustomCharacterMods.Add($"{pckId} → [{string.Join(",", chars)}]");
+                    skippedCustomCharacterMods.Add(new SkippedCustomCharacterMod(pckId, chars.ToList()));
                     continue;
                 }
                 // A mod that ships BOTH a base-character spine AND card_art/card_portraits is a "mixed"
