@@ -83,6 +83,9 @@ public static class DllSkinDetectionService
         var newAutoAssignments = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var ambiguous = new List<SuspectDllSkin>();
 
+        // Track suspects auto-skipped via signal A so we save the config once at the end.
+        var entityRescueDirty = false;
+
         foreach (var suspect in suspects)
         {
             if (alreadyDetected.Contains(suspect.ModId)) continue;
@@ -95,6 +98,15 @@ public static class DllSkinDetectionService
                 // — assigning it as a base skin would DLL-block it and the custom character would
                 // disappear whenever the user picks "default" or any other skin for that base.
                 MainFile.Logger.Info($"dll-skin: suppressing auto-suggest for custom-character mod '{suspect.ModId}' (patched [{string.Join(", ", suspect.PatchedTargets)}]). Its pck adds a non-base character; the byte-frequency suggester would mis-attribute references to a base character.");
+                continue;
+            }
+
+            // Signal A: if the suspect's DLL defines new game-entity subclasses, it's a content
+            // mod (Act4FinalAscent pattern). Auto-skip without prompting — the user can override
+            // from the DLL Mods decision panel if they really want to manage it as a skin.
+            if (EntityBasedRescue.TryGateSuspect(suspect.ModId, modsDir, choices))
+            {
+                entityRescueDirty = true;
                 continue;
             }
 
@@ -175,6 +187,14 @@ public static class DllSkinDetectionService
 
         if (newAutoAssignments.Count == 0)
         {
+            if (entityRescueDirty)
+            {
+                // Suspects auto-skipped via signal A added entries to _dll_skin_skipped — persist
+                // so the next boot doesn't re-flag them. No restart modal here; the rescued mods
+                // still loaded normally this session (their DLLs weren't blocked, only the skin-
+                // suggestion path was short-circuited).
+                choices.Save(choicesPath);
+            }
             if (ambiguous.Count > 0)
             {
                 MainFile.Logger.Info($"{ambiguous.Count} dll-skin candidate(s) need manual assignment — see _dll_skin_assignments / _dll_skin_skipped in skin_choices.json.");

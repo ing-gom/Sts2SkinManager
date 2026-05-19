@@ -177,6 +177,19 @@ public static class HarmonyPatchInspector
         return result;
     }
 
+    // Exposed so EntityDefinitionDetector callers can locate a mod's DLL on disk without
+    // re-walking the whole mods/ tree themselves. ModId convention matches BuildAssemblyToModIdMap.
+    public static string? FindModDllPath(string modsDir, string modId)
+    {
+        foreach (var dllPath in EnumerateDllsRecursive(modsDir))
+        {
+            var folderId = Path.GetFileNameWithoutExtension(dllPath);
+            if (string.Equals(folderId, modId, StringComparison.OrdinalIgnoreCase))
+                return dllPath;
+        }
+        return null;
+    }
+
     private static IEnumerable<string> EnumerateDllsRecursive(string root)
     {
         var stack = new Stack<string>();

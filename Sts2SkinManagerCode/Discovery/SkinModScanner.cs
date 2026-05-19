@@ -49,11 +49,16 @@ public static class SkinModScanner
         string modsDir,
         IReadOnlySet<string> baseCharacters,
         out List<SkippedCustomCharacterMod> skippedCustomCharacterMods,
-        IReadOnlyDictionary<string, string>? dllSkinAssignments = null)
+        IReadOnlyDictionary<string, string>? dllSkinAssignments = null,
+        IReadOnlyCollection<string>? dllSkinSkipped = null)
     {
         var result = new List<DetectedSkinMod>();
         skippedCustomCharacterMods = new List<SkippedCustomCharacterMod>();
         if (!Directory.Exists(modsDir)) return result;
+
+        var skipSet = dllSkinSkipped == null
+            ? new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            : new HashSet<string>(dllSkinSkipped, StringComparer.OrdinalIgnoreCase);
 
         // Recursive walk so users can group pcks under category folders (e.g. mods/캐릭터/, mods/아트워크/).
         // Each pck's immediate parent directory is treated as its modDir for preview lookup.
@@ -79,27 +84,39 @@ public static class SkinModScanner
             }
             seenModIds[pckId] = pck;
 
-            // DLL-driven character skin assignment overrides path-based detection. The mod's pck
-            // doesn't carry standard skin paths (private namespace like Hcxmmx_King_Skin), but the
-            // user already confirmed via the post-Harmony-inspection modal that it skins a base
-            // character. Treat it as a regular Character variant from now on so v0.7.0 DLL block
-            // and dropdown selection apply uniformly.
+            // User-explicit skip: leave the mod alone entirely. The pck still mounts normally
+            // through STS2's default mod loader, but Skin Manager won't display, classify, or
+            // DLL-block it. Used for content mods (Act4FinalAscent), false-positive auto-
+            // detections, and any mod the user opted out via the All Mods panel.
+            if (skipSet.Contains(pckId))
+            {
+                MainFile.Logger.Info($"  [user-skip] {pckId} (in _dll_skin_skipped) — leaving auto-mount intact.");
+                continue;
+            }
+
+            // DLL-driven character skin assignment overrides path-based detection. Originally
+            // intended only for mods whose pck has no standard skin paths (Hcxmmx_King_Skin),
+            // but the user can also force any mod into Character classification via the All Mods
+            // panel — e.g. mark a card-art mod as "Skin for defect" so its DLL gets blocked
+            // when another defect skin is active.
             if (dllSkinAssignments != null && dllSkinAssignments.TryGetValue(pckId, out var assignedChar))
             {
-                // Auto-heal: if the pck has non-base character paths, the mod adds a brand-new
-                // character. An auto-suggester false positive (e.g. STS1→STS2 ports reusing
-                // Necrobinder SFX events trick the byte-frequency suggester) wrote this
-                // assignment in a prior session; honoring it would DLL-block the custom character
-                // whenever the user picks "default" for the base. Ignore and fall through to the
-                // chars-based skip path, leaving auto-mount intact.
+                // Auto-heal: if the pck adds a brand-new character (non-base character paths),
+                // honoring the assignment would DLL-block the custom character whenever the
+                // user picks "default" for the base. Ignore and fall through.
                 if (baseCharacters.Count > 0 && chars.Any(c => !baseCharacters.Contains(c)))
                 {
                     MainFile.Logger.Warn($"dll skin assignment '{pckId}' → '{assignedChar}' contradicts pck signature [{string.Join(",", chars)}] (pck adds non-base character). Ignoring assignment; treating as custom-character mod. Remove the entry from _dll_skin_assignments in skin_choices.json to silence this warning.");
                 }
                 else if (baseCharacters.Count == 0 || baseCharacters.Contains(assignedChar))
                 {
+                    // Assignment wins over pck classification. If the pck happens to also carry
+                    // card_art (TheDefectCardArt forced as character skin scenario), preserve the
+                    // mixed flag so the user still sees it in the mixed panel for visibility —
+                    // but the primary classification is Character, with the assigned base char.
+                    var isMixed = isCardMod;
                     result.Add(new DetectedSkinMod(pckId, modDir, pck, SkinModKind.Character,
-                        new List<string> { assignedChar.ToLowerInvariant() }, previewPath, IsMixed: false, DomainsLabel: domainsLabel));
+                        new List<string> { assignedChar.ToLowerInvariant() }, previewPath, IsMixed: isMixed, DomainsLabel: domainsLabel));
                     continue;
                 }
                 else

@@ -16,6 +16,8 @@ public static class SkinSelectorOverlay
     private static Dictionary<string, List<DetectedSkinMod>>? _byCharacter;
     private static List<DetectedSkinMod> _cardMods = new();
     private static List<DetectedSkinMod> _mixedMods = new();
+    private static List<UnifiedModItem> _allMods = new();
+    private static IReadOnlySet<string> _baseCharacters = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
     private static OptionButton? _opt;
     private static Label? _label;
@@ -52,18 +54,35 @@ public static class SkinSelectorOverlay
 
     private static ScrollContainer? _mixedScroll;
     private static VBoxContainer? _mixedRows;
+    private static int _allModsTabIndex = -1;
+    private static ScrollContainer? _allModsScroll;
+    private static VBoxContainer? _allModsRows;
 
-    // Pending (in-memory) state shared by character dropdown + card pack panel + mixed-addon panel.
-    // Mutations here don't touch disk; OnSave commits to choices.json and triggers the modal.
+    // Pending (in-memory) state shared by character dropdown + card pack panel + mixed-addon panel
+    // + All Mods decision panel. Mutations here don't touch disk; OnSave commits to choices.json
+    // and triggers the modal.
     private static CardPacksConfig? _pendingCardPacks;
     private static CardPacksConfig? _pendingMixedAddons;
     private static readonly Dictionary<string, string> _pendingActiveByCharacter = new(StringComparer.OrdinalIgnoreCase);
+    // Per-mod pending override from the All Mods tab. The action sentinel encodes the user's
+    // chosen target classification — currently only "skip" is reachable from the UI (via the
+    // mod_list disable path); the rest of the sentinels (auto / skin:<char>) remain wired up
+    // for future use or manual skin_choices.json edits, but the tab itself only writes "skip".
+    private static readonly Dictionary<string, string> _pendingAllModsDecisions = new(StringComparer.OrdinalIgnoreCase);
 
     // Boot snapshot — what the game actually has loaded right now. dirty = (effective state != boot snapshot).
     // Stays dirty until the user restarts (which re-captures the snapshot). OnDiscard restores everything to this.
     private static CardPacksConfig? _bootSnapshotCardPacks;
     private static CardPacksConfig? _bootSnapshotMixedAddons;
     private static readonly Dictionary<string, string> _bootSnapshotActive = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly Dictionary<string, string> _bootSnapshotDllAssignments = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly HashSet<string> _bootSnapshotDllSkipped = new(StringComparer.OrdinalIgnoreCase);
+    // modId → is_enabled state read from settings.save mod_list at boot. Used as the dirty-check
+    // baseline for the Other Mods tab's enable/disable checkbox.
+    private static readonly Dictionary<string, bool> _bootSnapshotModEnabled = new(StringComparer.OrdinalIgnoreCase);
+    // Pending per-mod is_enabled changes from the Other Mods tab. Save applies these to
+    // settings.save via Sts2SettingsWriter.ApplyModEnabledState. Restart picks up the change.
+    private static readonly Dictionary<string, bool> _pendingModEnabled = new(StringComparer.OrdinalIgnoreCase);
 
     // Set by MainFile after the watcher is constructed; OnDiscard calls NoteSavedAsApplied()
     // so the post-discard disk write doesn't trigger a phantom restart modal.
@@ -76,12 +95,21 @@ public static class SkinSelectorOverlay
     private static bool _localeChangeSubscribed;
     private static bool _alreadyHandledThisEvent;
 
-    public static void Configure(string choicesPath, Dictionary<string, List<DetectedSkinMod>> byCharacter, List<DetectedSkinMod> cardMods, List<DetectedSkinMod> mixedMods)
+    public static void Configure(
+        string choicesPath,
+        Dictionary<string, List<DetectedSkinMod>> byCharacter,
+        List<DetectedSkinMod> cardMods,
+        List<DetectedSkinMod> mixedMods,
+        List<UnifiedModItem>? allMods = null,
+        IReadOnlySet<string>? baseCharacters = null,
+        IReadOnlyDictionary<string, bool>? bootModEnabled = null)
     {
         _choicesPath = choicesPath;
         _byCharacter = byCharacter;
         _cardMods = cardMods;
         _mixedMods = mixedMods;
+        _allMods = allMods ?? new List<UnifiedModItem>();
+        _baseCharacters = baseCharacters ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         var initial = SkinChoicesConfig.LoadOrEmpty(_choicesPath);
         _pendingCardPacks = ClonePacks(initial.CardPacks);
@@ -90,7 +118,18 @@ public static class SkinSelectorOverlay
         _bootSnapshotMixedAddons = ClonePacks(initial.MixedAddons);
         _bootSnapshotActive.Clear();
         foreach (var kv in initial.Characters) _bootSnapshotActive[kv.Key] = kv.Value.Active ?? "default";
+        _bootSnapshotDllAssignments.Clear();
+        foreach (var kv in initial.DllSkinAssignments) _bootSnapshotDllAssignments[kv.Key] = kv.Value;
+        _bootSnapshotDllSkipped.Clear();
+        foreach (var s in initial.DllSkinSkipped) _bootSnapshotDllSkipped.Add(s);
+        _bootSnapshotModEnabled.Clear();
+        if (bootModEnabled != null)
+        {
+            foreach (var kv in bootModEnabled) _bootSnapshotModEnabled[kv.Key] = kv.Value;
+        }
         _pendingActiveByCharacter.Clear();
+        _pendingAllModsDecisions.Clear();
+        _pendingModEnabled.Clear();
         _previewHovered = false;
     }
 
@@ -596,10 +635,11 @@ public static class SkinSelectorOverlay
         PositionAccordion(vbox);
         _accordionVBox = vbox;
 
-        // Tabs are only useful when card-skin or mixed-addon mods exist. When the panel is shown
-        // purely for character-skin variant changes, skip the outer toggle + TabContainer entirely
-        // and just expose Save / Discard.
-        var hasTabContent = _cardMods.Count > 0 || _mixedMods.Count > 0;
+        // Tabs are only useful when card-skin or mixed-addon mods exist, or when the All Mods
+        // master view has anything to surface. When the panel is shown purely for character-skin
+        // variant changes, skip the outer toggle + TabContainer entirely and just expose Save /
+        // Discard.
+        var hasTabContent = _cardMods.Count > 0 || _mixedMods.Count > 0 || _allMods.Count > 0;
 
         // Top row — toggle (compact, only when there are tabs) + Save / Discard.
         var topRow = new HBoxContainer { CustomMinimumSize = new Vector2(480, 36) };
@@ -634,6 +674,7 @@ public static class SkinSelectorOverlay
 
         _cardPackTabIndex = -1;
         _mixedTabIndex = -1;
+        _allModsTabIndex = -1;
 
         TabContainer? tabs = null;
         if (hasTabContent)
@@ -654,7 +695,10 @@ public static class SkinSelectorOverlay
             _tabContainer = null;
         }
 
-        if (tabs != null && _cardMods.Count > 0)
+        // All three tabs are built unconditionally now so the panel has a stable shape regardless
+        // of what mods the user has installed. Empty tabs show a "no mods" placeholder built into
+        // the row builder so the tab itself stays visible and switchable.
+        if (tabs != null)
         {
             var cardTab = new VBoxContainer { Name = "CardSkinTab" };
             var cardScroll = new ScrollContainer
@@ -675,7 +719,7 @@ public static class SkinSelectorOverlay
             BuildCardPackRows();
         }
 
-        if (tabs != null && _mixedMods.Count > 0)
+        if (tabs != null)
         {
             var mixedTab = new VBoxContainer { Name = "MixedAddonTab" };
 
@@ -706,8 +750,40 @@ public static class SkinSelectorOverlay
             BuildMixedAddonRows();
         }
 
+        if (tabs != null && _allMods.Count > 0)
+        {
+            var allTab = new VBoxContainer { Name = "AllModsTab" };
+
+            var helpLabel = new Label
+            {
+                Text = Strings.Get("all_mods_panel_help"),
+                CustomMinimumSize = new Vector2(460, 0),
+                AutowrapMode = TextServer.AutowrapMode.WordSmart,
+                Modulate = new Color(0.75f, 0.75f, 0.75f),
+            };
+            allTab.AddChild(helpLabel);
+
+            var allScroll = new ScrollContainer
+            {
+                CustomMinimumSize = new Vector2(460, 340),
+                HorizontalScrollMode = ScrollContainer.ScrollMode.Disabled,
+                VerticalScrollMode = ScrollContainer.ScrollMode.Auto,
+            };
+            _allModsScroll = allScroll;
+            allTab.AddChild(allScroll);
+
+            var allRows = new VBoxContainer { CustomMinimumSize = new Vector2(460, 0) };
+            _allModsRows = allRows;
+            allScroll.AddChild(allRows);
+
+            tabs.AddChild(allTab);
+            _allModsTabIndex = allTab.GetIndex();
+            BuildAllModsRows();
+        }
+
         UpdateCardPackHeader();
         UpdateMixedHeader();
+        UpdateAllModsHeader();
         ApplyOuterExpanded();
         UpdateOuterToggleText();
 
@@ -787,6 +863,19 @@ public static class SkinSelectorOverlay
         }
 
         var packs = _pendingCardPacks ?? new CardPacksConfig();
+        if (packs.Ordering.Count == 0)
+        {
+            var placeholder = new Label
+            {
+                Text = Strings.Get("card_panel_empty"),
+                CustomMinimumSize = new Vector2(460, 60),
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center,
+                AutowrapMode = TextServer.AutowrapMode.WordSmart,
+                Modulate = new Color(0.6f, 0.6f, 0.6f),
+            };
+            _cardPackRows.AddChild(placeholder);
+        }
         for (var i = 0; i < packs.Ordering.Count; i++)
         {
             var modId = packs.Ordering[i];
@@ -1044,6 +1133,135 @@ public static class SkinSelectorOverlay
         }
     }
 
+    private static void UpdateAllModsHeader()
+    {
+        if (_allMods.Count == 0) return;
+        var enabled = 0;
+        foreach (var item in _allMods)
+        {
+            var bootEnabled = _bootSnapshotModEnabled.TryGetValue(item.ModId, out var be) ? be : true;
+            var eff = _pendingModEnabled.TryGetValue(item.ModId, out var p) ? p : bootEnabled;
+            if (eff) enabled++;
+        }
+        var title = $"{Strings.Get("all_mods_panel_header")} ({enabled}/{_allMods.Count})";
+        if (_tabContainer != null && GodotObject.IsInstanceValid(_tabContainer) && _allModsTabIndex >= 0)
+        {
+            _tabContainer.SetTabTitle(_allModsTabIndex, title);
+            _tabContainer.SetTabTooltip(_allModsTabIndex, $"{enabled} enabled / {_allMods.Count} total");
+        }
+        UpdateOuterToggleText();
+    }
+
+    // Resolves the visible category/character for a mod after applying any pending override.
+    // Currently consumed only by tooltip-related helpers; the Other Mods row UI no longer surfaces
+    // category badges or cross-category reclassification.
+    private static (UnifiedModCategory category, string character) EffectiveCategoryAndChar(UnifiedModItem item)
+    {
+        if (_pendingAllModsDecisions.TryGetValue(item.ModId, out var action))
+        {
+            if (action == "skip") return (UnifiedModCategory.NotManaged, "");
+            if (action.StartsWith("skin:", StringComparison.Ordinal))
+                return (UnifiedModCategory.CharacterSkin, action.Substring(5));
+            // "auto" → revert to scanner-detected base; fall through using item.Category as-is
+            return (item.Category, item.Character ?? "");
+        }
+        return (item.Category, item.Character ?? "");
+    }
+
+    private static void BuildAllModsRows()
+    {
+        if (_allModsRows == null || !GodotObject.IsInstanceValid(_allModsRows)) return;
+
+        for (var i = _allModsRows.GetChildCount() - 1; i >= 0; i--)
+        {
+            var child = _allModsRows.GetChild(i);
+            _allModsRows.RemoveChild(child);
+            child.QueueFree();
+        }
+
+        foreach (var item in _allMods)
+        {
+            var row = BuildAllModsRow(item);
+            _allModsRows.AddChild(row);
+        }
+        UpdateAllModsHeader();
+    }
+
+    private static Control BuildAllModsRow(UnifiedModItem item)
+    {
+        var hbox = new HBoxContainer
+        {
+            CustomMinimumSize = new Vector2(460, 36),
+            MouseFilter = Control.MouseFilterEnum.Pass,
+        };
+
+        // CheckBox controls the mod's is_enabled state in STS2's settings.save mod_list. Off =
+        // STS2 won't load this mod on next launch (DLL + pck disabled at the framework level,
+        // independent of SkinManager's dll-block). On = STS2 loads it normally.
+        var bootEnabled = _bootSnapshotModEnabled.TryGetValue(item.ModId, out var be) ? be : true;
+        var pendingEnabled = _pendingModEnabled.TryGetValue(item.ModId, out var pe) ? pe : bootEnabled;
+        var check = new CheckBox
+        {
+            ButtonPressed = pendingEnabled,
+            CustomMinimumSize = new Vector2(32, 32),
+            TooltipText = Strings.Get("all_mods_toggle_tooltip"),
+        };
+        hbox.AddChild(check);
+
+        var status = new Label
+        {
+            CustomMinimumSize = new Vector2(24, 32),
+            VerticalAlignment = VerticalAlignment.Center,
+            HorizontalAlignment = HorizontalAlignment.Center,
+        };
+        hbox.AddChild(status);
+
+        var displayName = string.IsNullOrEmpty(item.ManifestName) ? item.ModId : item.ManifestName;
+        var nameLabel = new Label
+        {
+            Text = displayName,
+            CustomMinimumSize = new Vector2(360, 32),
+            VerticalAlignment = VerticalAlignment.Center,
+            // MouseFilter.Stop is required for hover tooltips to fire on a Godot Label —
+            // the default (Ignore) lets clicks/hover events pass through without triggering
+            // the TooltipText display.
+            MouseFilter = Control.MouseFilterEnum.Stop,
+            TooltipText = BuildAllModsTooltip(item),
+        };
+        hbox.AddChild(nameLabel);
+
+        check.Toggled += isOn =>
+        {
+            // If toggle returns to boot value, drop the pending entry; otherwise record the
+            // override. Save applies them all to settings.save in one shot.
+            if (isOn == bootEnabled) _pendingModEnabled.Remove(item.ModId);
+            else _pendingModEnabled[item.ModId] = isOn;
+            ApplyRowVisual();
+            UpdateAllModsHeader();
+            UpdateCardPackHeader();
+        };
+
+        void ApplyRowVisual()
+        {
+            var enabled = _pendingModEnabled.TryGetValue(item.ModId, out var p) ? p : bootEnabled;
+            nameLabel.Modulate = enabled ? Colors.White : new Color(0.55f, 0.55f, 0.55f);
+            status.Text = enabled ? "✓" : "—";
+            status.Modulate = enabled ? new Color(0.6f, 0.95f, 0.6f) : new Color(0.55f, 0.55f, 0.55f);
+        }
+        ApplyRowVisual();
+
+        return hbox;
+    }
+
+    private static string BuildAllModsTooltip(UnifiedModItem item)
+    {
+        var lines = new List<string> { item.ModId };
+        if (!string.IsNullOrEmpty(item.ManifestDescription)) lines.Add(item.ManifestDescription);
+        if (!string.IsNullOrEmpty(item.DomainsLabel)) lines.Add(item.DomainsLabel);
+        if (item.DefinesContentEntities) lines.Add(Strings.Get("all_mods_tooltip_content"));
+        return string.Join("\n", lines);
+    }
+
     private static void BuildMixedAddonRows()
     {
         if (_mixedRows == null || !GodotObject.IsInstanceValid(_mixedRows)) return;
@@ -1056,6 +1274,19 @@ public static class SkinSelectorOverlay
         }
 
         var packs = _pendingMixedAddons ?? new CardPacksConfig();
+        if (packs.Ordering.Count == 0)
+        {
+            var placeholder = new Label
+            {
+                Text = Strings.Get("mixed_panel_empty"),
+                CustomMinimumSize = new Vector2(460, 60),
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center,
+                AutowrapMode = TextServer.AutowrapMode.WordSmart,
+                Modulate = new Color(0.6f, 0.6f, 0.6f),
+            };
+            _mixedRows.AddChild(placeholder);
+        }
         for (var i = 0; i < packs.Ordering.Count; i++)
         {
             var modId = packs.Ordering[i];
@@ -1271,12 +1502,73 @@ public static class SkinSelectorOverlay
             }
             if (_pendingCardPacks != null) choices.CardPacks = ClonePacks(_pendingCardPacks);
             if (_pendingMixedAddons != null) choices.MixedAddons = ClonePacks(_pendingMixedAddons);
+
+            // Apply All Mods reclassifications. Action sentinel encodes target:
+            //   "auto"        → clear overrides; scanner re-classifies on next boot
+            //   "skip"        → add to _dll_skin_skipped, remove from assignments
+            //   "skin:<char>" → add to _dll_skin_assignments with that char, remove from skipped
+            foreach (var (modId, action) in _pendingAllModsDecisions)
+            {
+                if (action == "skip")
+                {
+                    choices.DllSkinAssignments.Remove(modId);
+                    choices.DllSkinSkipped.Add(modId);
+                }
+                else if (action.StartsWith("skin:", StringComparison.Ordinal))
+                {
+                    var ch = action.Substring(5);
+                    choices.DllSkinSkipped.Remove(modId);
+                    choices.DllSkinAssignments[modId] = ch;
+                }
+                else // "auto" or unknown
+                {
+                    choices.DllSkinAssignments.Remove(modId);
+                    choices.DllSkinSkipped.Remove(modId);
+                }
+            }
+
             choices.Save(_choicesPath);
             _pendingActiveByCharacter.Clear();
+            _pendingAllModsDecisions.Clear();
+
+            // Apply Other Mods enable/disable to STS2's settings.save mod_list.
+            if (_pendingModEnabled.Count > 0)
+            {
+                var userDataDir = OS.GetUserDataDir();
+                var settings = Sts2SettingsWriter.FindAndLoad(userDataDir);
+                if (settings != null)
+                {
+                    var diskChanged = Sts2SettingsWriter.ApplyModEnabledState(settings, _pendingModEnabled);
+                    var memChanged = false;
+                    var mm = MegaCrit.Sts2.Core.Modding.ModManager._settings;
+                    if (mm != null)
+                    {
+                        foreach (var entry in mm.ModList)
+                        {
+                            if (string.IsNullOrEmpty(entry.Id)) continue;
+                            if (_pendingModEnabled.TryGetValue(entry.Id, out var want) && entry.IsEnabled != want)
+                            {
+                                entry.IsEnabled = want;
+                                memChanged = true;
+                            }
+                        }
+                    }
+                    if (diskChanged) Sts2SettingsWriter.Save(settings);
+                    MainFile.Logger.Info($"save → applied {_pendingModEnabled.Count} mod_list toggle(s) (disk={diskChanged} mem={memChanged}).");
+                }
+                else
+                {
+                    MainFile.Logger.Warn("save → mod_list toggle requested but settings.save not found.");
+                }
+                // Take a snapshot so this session matches what we just wrote (until full restart).
+                foreach (var kv in _pendingModEnabled) _bootSnapshotModEnabled[kv.Key] = kv.Value;
+                _pendingModEnabled.Clear();
+            }
 
             MainFile.Logger.Info("save → choices.json updated (watcher may also fire; ShowOrReset will dedupe)");
             UpdateCardPackHeader();
             UpdateMixedHeader();
+            UpdateAllModsHeader();
 
             // Show modal directly so this doesn't depend on the file watcher firing.
             // The watcher may also call ShowOrReset; the second call just resets the countdown.
@@ -1295,6 +1587,8 @@ public static class SkinSelectorOverlay
         {
             if (_bootSnapshotCardPacks == null) return;
             _pendingActiveByCharacter.Clear();
+            _pendingAllModsDecisions.Clear();
+            _pendingModEnabled.Clear();
             _pendingCardPacks = ClonePacks(_bootSnapshotCardPacks);
             if (_bootSnapshotMixedAddons != null) _pendingMixedAddons = ClonePacks(_bootSnapshotMixedAddons);
 
@@ -1325,6 +1619,7 @@ public static class SkinSelectorOverlay
             {
                 BuildCardPackRows();
                 BuildMixedAddonRows();
+                BuildAllModsRows();
                 RefreshItems();
             }).CallDeferred();
         }
@@ -1361,6 +1656,36 @@ public static class SkinSelectorOverlay
             var effectiveActive = _pendingActiveByCharacter.TryGetValue(character, out var p) ? p : (choice.Active ?? "default");
             if (!string.Equals(effectiveActive, bootActive, StringComparison.OrdinalIgnoreCase)) return true;
         }
+
+        // Pending classification changes (only reachable via skin_choices.json edits in v0.12,
+        // but kept for forward compat if a future tab re-adds the dropdown).
+        foreach (var (modId, action) in _pendingAllModsDecisions)
+        {
+            var bootAssigned = _bootSnapshotDllAssignments.TryGetValue(modId, out var ba) ? ba : "";
+            var bootSkipped = _bootSnapshotDllSkipped.Contains(modId);
+
+            if (action == "skip")
+            {
+                if (!bootSkipped) return true;
+            }
+            else if (action.StartsWith("skin:", StringComparison.Ordinal))
+            {
+                var ch = action.Substring(5);
+                if (!string.Equals(ch, bootAssigned, StringComparison.OrdinalIgnoreCase)) return true;
+            }
+            else // "auto"
+            {
+                if (bootSkipped || !string.IsNullOrEmpty(bootAssigned)) return true;
+            }
+        }
+
+        // Pending mod_list enable/disable changes from the Other Mods tab checkbox.
+        foreach (var (modId, want) in _pendingModEnabled)
+        {
+            var bootEnabled = _bootSnapshotModEnabled.TryGetValue(modId, out var be) ? be : true;
+            if (want != bootEnabled) return true;
+        }
+
         return false;
     }
 

@@ -4,6 +4,18 @@ All notable changes to Sts2SkinManager are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.0] - 2026-05-19
+
+### Fixed — content mods (Act 4: Final Ascent style) no longer hijacked as character skins
+- **Entity-definition rescue for false-positive DLL skin assignments.** v0.11.0–.9 auto-assigned DLL-driven character skin candidates via `CharacterIdSuggester` (byte-frequency scan of the mod's DLL + pck). Content mods like [Act 4: Final Ascent](https://www.nexusmods.com/slaythespire2/mods/37) (Nexus #37, "Adds The Architect as a full Act 4 boss encounter") reuse Defect's spine/sprite assets inside their pck and pass the suggester's dominance ratio — they were written into `_dll_skin_assignments` as defect skins, then DLL-blocked whenever the user picked a non-default Defect skin. New `EntityDefinitionDetector` reads each mod's DLL via `System.Reflection.Metadata` (PE/TypeDef parsing only, no assembly load) and checks whether it defines new `MonsterModel` / `EncounterModel` / `EventModel` / `CardModel` / `PowerModel` / `RelicModel` / `PotionModel` subclasses. Skin mods never extend these bases; content mods almost always do. Any positive signal demotes the assignment from `_dll_skin_assignments` to `_dll_skin_skipped` at `MainFile.Initialize` time — before `SkinModScanner` reads the (now-cleaned) assignment map — so the rescued mod's DLL is no longer blocked starting from the next boot.
+- **Auto-suggester now gated by the same signal.** New suspects discovered by `HarmonyPatchInspector` at the deferred 2-second pass are routed through `EntityBasedRescue.TryGateSuspect` before reaching `CharacterIdSuggester`. A mod that defines content entities is added to `_dll_skin_skipped` silently — no restart modal, no false-positive assignment to clean up later.
+
+### Added — "Other Mods" tab (sibling of Card / Mixed tabs)
+- **New "Other Mods" tab covers everything not handled by the Card or Mixed tabs.** Surfaces pck-detected character variants (animeDefect), user-skipped DLL mods (Act4FinalAscent after rescue), pending DLL+pck mods awaiting a decision (Hcxmmx_King_Skin pre-confirmation), and any card/mixed mod the user has force-assigned into a character slot via `_dll_skin_assignments`. Pure card and pure mixed mods continue to live in their dedicated tabs.
+- **Each row has a checkbox toggle + reclassification dropdown.** Checkbox is the on/off switch for "Skin Manager is managing this mod" — unchecking adds the mod to `_dll_skin_skipped` (its DLL stays loaded, no panel surfaces it). Dropdown picks the explicit assignment when managed: `Auto` (no override, scanner re-classifies) or `Skin for {char}` (force into `_dll_skin_assignments`). Save persists to `skin_choices.json` and triggers the standard restart modal.
+- **`SkinModScanner` now honors user overrides for any mod.** `_dll_skin_assignments` previously only injected DLL-only mods (no character pck paths) as Character variants; it now overrides classification for ANY modId — so a user can force a card-art mod into a character skin slot if they want its DLL gated when a different skin for that character is active. `_dll_skin_skipped` now also short-circuits at the scanner stage: skipped mods are excluded from all panels and never DLL-blocked, regardless of pck content.
+- **Boot-time `[all-mods]` log.** Every boot prints a one-line summary per tracked mod (`Act4FinalAscent → skipped [content-mod]`, `animeDefect → char→defect`) so users can confirm classifications without opening the UI.
+
 ## [0.11.9] - 2026-05-17
 
 ### Added — single-source asset catalog + richer per-mod diagnostics

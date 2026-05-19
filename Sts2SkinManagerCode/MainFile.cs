@@ -55,9 +55,20 @@ public partial class MainFile : Node
         // assignments-only mods (e.g. Hcxmmx_King_Skin) as Character variants even though their
         // pck has no animations/characters/{base}/ paths.
         var preliminaryChoicesPath = Path.Combine(managerDataDir, "skin_choices.json");
-        var preliminaryDllAssignments = SkinChoicesConfig.LoadOrEmpty(preliminaryChoicesPath).DllSkinAssignments;
 
-        var detected = SkinModScanner.Scan(modsDir, baseCharacters, out var skippedCustom, preliminaryDllAssignments);
+        // Entity-based rescue: prior versions may have auto-assigned content mods (Act4FinalAscent
+        // pattern) as Defect skins via CharacterIdSuggester false positives. Run a metadata-level
+        // type-graph check on each assigned mod's DLL and demote any that defines new MonsterModel/
+        // EventModel/EncounterModel/CardModel/PowerModel/RelicModel/PotionModel subclasses. This
+        // must run BEFORE the scanner reads _dll_skin_assignments — otherwise the demoted mod still
+        // gets dll-blocked for the current session.
+        var rescue = EntityBasedRescue.RunPreScan(modsDir, preliminaryChoicesPath);
+
+        var preliminaryChoices = SkinChoicesConfig.LoadOrEmpty(preliminaryChoicesPath);
+        var preliminaryDllAssignments = preliminaryChoices.DllSkinAssignments;
+        var preliminaryDllSkipped = preliminaryChoices.DllSkinSkipped;
+
+        var detected = SkinModScanner.Scan(modsDir, baseCharacters, out var skippedCustom, preliminaryDllAssignments, preliminaryDllSkipped);
         var characterMods = detected.Where(d => d.Kind == SkinModKind.Character).ToList();
         var cardMods = detected.Where(d => d.Kind == SkinModKind.Cards).ToList();
 
@@ -260,7 +271,37 @@ public partial class MainFile : Node
         _watcher = new ChoicesFileWatcher(choicesPath, managerDataDir, byCharacter, cardMods, choices);
         _watcher.Start();
 
-        SkinSelectorOverlay.Configure(choicesPath, byCharacter, cardMods, mixedMods);
+        // Build the unified All Mods list. Spans every mod SkinManager is aware of: character
+        // variants, card skins, mixed mods, user-skipped DLL mods, and pending DLL+pck mods.
+        // Excludes SkinManager itself, BaseLib, Sts2* sister mods, and custom-character mods.
+        var customCharacterIdsForPanel = skippedCustom.Select(s => s.ModId).ToList();
+        var allMods = UnifiedModBuilder.Build(modsDir, detected, choices, customCharacterIdsForPanel, baseCharacters);
+        if (allMods.Count > 0)
+        {
+            Logger.Info($"all mods: {allMods.Count} mod(s) tracked:");
+            foreach (var m in allMods)
+            {
+                var categoryLabel = m.Category switch
+                {
+                    Discovery.UnifiedModCategory.CharacterSkin => $"char→{m.Character ?? "?"}",
+                    Discovery.UnifiedModCategory.CardSkin => "card",
+                    Discovery.UnifiedModCategory.Mixed => $"mixed→{m.Character ?? "?"}",
+                    Discovery.UnifiedModCategory.NotManaged => "skipped",
+                    _ => "pending",
+                };
+                var entityTag = m.DefinesContentEntities ? " [content-mod]" : "";
+                Logger.Info($"  [all-mods] {m.ModId} → {categoryLabel}{entityTag}");
+            }
+        }
+
+        // Read current mod_list enabled state so the "Other Mods" tab checkbox reflects the
+        // game's actual per-mod is_enabled. Falls back to empty (defaults to true per row) if
+        // settings.save is missing.
+        var bootModEnabled = settings != null
+            ? Sts2SettingsWriter.ReadModEnabledState(settings)
+            : new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+
+        SkinSelectorOverlay.Configure(choicesPath, byCharacter, cardMods, mixedMods, allMods, baseCharacters, bootModEnabled);
         SkinSelectorOverlay.SetWatcher(_watcher);
 
         // Defer ModConfig registration so the framework's own Initialize can run first.
