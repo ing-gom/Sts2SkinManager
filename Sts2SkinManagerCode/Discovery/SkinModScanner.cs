@@ -101,12 +101,20 @@ public static class SkinModScanner
             // when another defect skin is active.
             if (dllSkinAssignments != null && dllSkinAssignments.TryGetValue(pckId, out var assignedChar))
             {
-                // Auto-heal: if the pck adds a brand-new character (non-base character paths),
-                // honoring the assignment would DLL-block the custom character whenever the
-                // user picks "default" for the base. Ignore and fall through.
-                if (baseCharacters.Count > 0 && chars.Any(c => !baseCharacters.Contains(c)))
+                // Auto-heal: if the pck adds a brand-new character (non-base character paths)
+                // OR the mod declares itself as a BaseLib custom-character via manifest dependency
+                // / DLL CustomCharacterModel reference, honoring the assignment would DLL-block
+                // the custom character whenever the user picks "default" for the base. Ignore
+                // and fall through to the empty-chars branch below.
+                var hasNonBaseCharPath = baseCharacters.Count > 0 && chars.Any(c => !baseCharacters.Contains(c));
+                var declaresCustomCharFramework = chars.Count == 0
+                    && CustomCharacterFrameworkDetector.IsCustomCharacterMod(modDir, pckId);
+                if (hasNonBaseCharPath || declaresCustomCharFramework)
                 {
-                    MainFile.Logger.Warn($"dll skin assignment '{pckId}' → '{assignedChar}' contradicts pck signature [{string.Join(",", chars)}] (pck adds non-base character). Ignoring assignment; treating as custom-character mod. Remove the entry from _dll_skin_assignments in skin_choices.json to silence this warning.");
+                    var reason = hasNonBaseCharPath
+                        ? $"pck adds non-base character [{string.Join(",", chars)}]"
+                        : "manifest declares BaseLib dependency or DLL references CustomCharacterModel";
+                    MainFile.Logger.Warn($"dll skin assignment '{pckId}' → '{assignedChar}' contradicts mod signature ({reason}). Ignoring assignment; treating as custom-character mod. Remove the entry from _dll_skin_assignments in skin_choices.json to silence this warning.");
                 }
                 else if (baseCharacters.Count == 0 || baseCharacters.Contains(assignedChar))
                 {
@@ -146,7 +154,7 @@ public static class SkinModScanner
                 var isMixed = isCardMod;
                 result.Add(new DetectedSkinMod(pckId, modDir, pck, SkinModKind.Character, baseHits.ToList(), previewPath, isMixed, domainsLabel));
             }
-            else if (scan.IsCustomCharacterMod)
+            else if (scan.IsCustomCharacterMod || CustomCharacterFrameworkDetector.IsCustomCharacterMod(modDir, pckId))
             {
                 // BaseLib-style custom-character mod that packs spine under a non-standard path
                 // (no `animations/characters/{X}/`) but ships C# code under `Code/Character/`,
@@ -154,8 +162,18 @@ public static class SkinModScanner
                 // manifest. The Watcher STS1→STS2 port is the canonical case — its 184 portraits
                 // under `Watcher/images/card_portraits/` would otherwise misclassify it as a
                 // base-card portrait redirect (RegentFemPortraits-style) and surface it in the
-                // card-skin panel, where the user could accidentally disable it. Skip from
-                // classification so the game's normal mod loader keeps it mounted.
+                // card-skin panel, where the user could accidentally disable it.
+                //
+                // CustomCharacterFrameworkDetector covers the second failure mode: mods like
+                // MzmChar (Wakaba Mutsumi) that pack assets under `res://{ModId}/characters/`
+                // and ship no `Code/Character/` source inside the pck — so the PCK-path regex
+                // misses them entirely. We catch those via the manifest's BaseLib dependency
+                // declaration or a direct DLL reference to `CustomCharacterModel`. Without this,
+                // CharacterIdSuggester scored MzmChar.dll's legitimate Ironclad-template
+                // references as 34/0 dominance and auto-blocked the whole custom character
+                // whenever another Ironclad skin was active.
+                //
+                // Skip from classification so the game's normal mod loader keeps it mounted.
                 skippedCustomCharacterMods.Add(new SkippedCustomCharacterMod(pckId, new List<string>(), domainsLabel));
             }
             else if (isCardMod)

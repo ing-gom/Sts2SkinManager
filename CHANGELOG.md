@@ -4,6 +4,16 @@ All notable changes to Sts2SkinManager are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.1] - 2026-05-20
+
+### Fixed — BaseLib custom-character mods with mod-namespaced asset paths no longer hijacked as base skins
+- **Mods like [MzmChar (Wakaba Mutsumi)](https://www.nexusmods.com/slaythespire2/mods/180) that pack assets under `res://{ModId}/characters/...` instead of the STS2-standard `res://animations/characters/{id}/...` are now correctly classified as custom-character mods.** Previously, every PCK-based signal missed them: no `animations/characters/{base}/` paths (so `chars` was empty), no `Code/Character/` or `CustomCharacterModel` strings inside the pck (so `IsCustomCharacterMod` was false), no `card_art/` matches. The scanner fell through with no classification, but the deferred `CharacterIdSuggester` then scored the mod's DLL — which legitimately references the base Ironclad character data as a framework template — at 34/0 dominance and auto-wrote `MzmChar → ironclad` into `_dll_skin_assignments`. The result: whenever the user activated any other Ironclad skin, MzmChar.dll was DLL-blocked and the Wakaba Mutsumi character disappeared from the roster.
+- **New `CustomCharacterFrameworkDetector` adds two signals SkinModScanner now consults whenever the PCK-path scan returns no character paths and no card-art hits:**
+  1. **Manifest `dependencies: ["BaseLib"]`.** The canonical, author-declared signal — BaseLib is the custom-character framework, and only mods that add new characters depend on it. Both MzmChar.json and Watcher.json declare it.
+  2. **DLL byte reference to `CustomCharacterModel` (ASCII or UTF-16 LE).** The framework's base class name. A mod that inherits from it is by definition adding a new character. Defense-in-depth for any future custom-character mod that ships without declaring BaseLib in its manifest.
+  Either signal triggers `skippedCustomCharacterMods` — the mod stays auto-mounted by STS2's normal mod loader, never DLL-blocked, never surfaced in the character/card panels where the user could accidentally disable it.
+- **Auto-heal extended to existing mis-assignments.** If `_dll_skin_assignments` already contains an entry like `MzmChar → ironclad` from a previous boot, the scanner now also ignores it when the new detector fires — so users hit by this on v0.11.0–0.12.0 self-recover on the next boot. The warning log line names the trigger (`manifest declares BaseLib dependency or DLL references CustomCharacterModel`) so users can find and remove the stale entry from `skin_choices.json`.
+
 ## [0.12.0] - 2026-05-19
 
 ### Fixed — content mods (Act 4: Final Ascent style) no longer hijacked as character skins
