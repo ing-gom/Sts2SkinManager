@@ -12,6 +12,7 @@ A Slay the Spire 2 mod that manages installed **character skin mods**, **card sk
   - **Character skin mods** — `.pck` files containing `res://animations/characters/{character}/...` paths
   - **Card skin mods** — `.pck` files overriding `card_art/...` or shipping `card_portraits/`
   - **Mixed mods** — `.pck` files that bundle a character spine with card art / event scenes (e.g. AncientWaifus)
+  - **Event-art mods** — `.pck` files that only retexture Ancient NPC portraits (`images/ancients/`) or event scene backgrounds (`images/events/`), e.g. AncientRetexture. Surface in the "Other Mods" tab as a simple on/off toggle
 - **Collapsible Skin Manager toggle** wraps everything — default collapsed so Character Select stays clean. Save / Discard stay alongside the toggle regardless of body state. Inside, tabs switch between:
   - **Character skin dropdown** — pick which variant is active per character. Mixed mods get a `📦` indicator + per-item tooltip
   - **Card skin tab** — toggle individual packs, reorder priority (top wins for overlapping cards), drag-and-drop or ↑/↓ arrows

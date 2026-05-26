@@ -42,8 +42,15 @@ public static class AssetDomainCatalog
     //   - `Code/Character/` — mod ships its own character C# class (Watcher.cs, ZilchD.cs, etc.)
     //   - `CustomCharacterModel` — BaseLib's base class for derived custom characters
     //   - `characters.json` — BaseLib's character-registration manifest convention
+    //
+    // The `characters.json` alternative uses a negative lookbehind to EXCLUDE paths under
+    // `localization/{lang}/`, where a file by that name is just a name dictionary for
+    // event/dialog NPCs, NOT a BaseLib registration manifest. AncientRetexture (event
+    // retexture mod) ships `AncientRetexture/localization/eng/characters.json` — without
+    // this exclusion it gets misclassified as a custom-character mod and silently skipped.
+    // Real BaseLib `characters.json` lives at the mod root, never under `localization/`.
     public static readonly Regex CustomCharacterIndicatorRegex = new(
-        @"Code/Character/|CustomCharacterModel|characters\.json",
+        @"Code/Character/|CustomCharacterModel|(?<!localization/[a-z]{2,4}/)characters\.json",
         RegexOptions.IgnoreCase | RegexOptions.Compiled
     );
 
@@ -60,6 +67,18 @@ public static class AssetDomainCatalog
         RegexOptions.IgnoreCase | RegexOptions.Compiled
     );
 
+    // Event / Ancient retexture mods — Neow-equivalent NPC portraits under
+    // `images/ancients/{name}_placeholder.png` and event scene backgrounds under
+    // `images/events/{event_name}.png`. Mods using namespaced asset paths
+    // (`MyMod/images/ancients/...`) plus a DLL-side path redirect (AncientRetexture pattern)
+    // still match because we do unanchored substring search. Distinct from card/spine
+    // domains: a mod that ONLY touches these paths would otherwise fall through every
+    // classification branch and be invisible to the manager.
+    public static readonly Regex EventArtRegex = new(
+        @"images/ancients/|images/events/",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled
+    );
+
     // Per-pck scan result. Hit counts are exposed for diagnostic logging so users can see at a
     // glance which signal drove a mod's classification (or didn't).
     public sealed record PathScan(
@@ -68,23 +87,26 @@ public static class AssetDomainCatalog
         int CardArtHits,
         int CardPortraitsHits,
         int CustomCharacterIndicatorHits,
-        int CharSelectAssetHits)
+        int CharSelectAssetHits,
+        int EventArtHits)
     {
         public bool HasCardArt => CardArtHits > 0;
         public bool HasCardPortraits => CardPortraitsHits > 0;
         public bool IsCardMod => HasCardArt || HasCardPortraits;
         public bool IsCustomCharacterMod => CustomCharacterIndicatorHits > 0;
         public bool HasCharSelectAsset => CharSelectAssetHits > 0;
+        public bool IsEventArtMod => EventArtHits > 0;
 
         // Compact one-line summary for boot log — only non-zero domains appear, so the line
         // stays short for mods that only touch one or two categories.
         public string ToLabel()
         {
-            var parts = new List<string>(5);
+            var parts = new List<string>(6);
             if (CharacterSpineHits > 0) parts.Add($"spine:{CharacterSpineHits}");
             if (CharSelectAssetHits > 0) parts.Add($"char_select:{CharSelectAssetHits}");
             if (CardArtHits > 0) parts.Add($"card_art:{CardArtHits}");
             if (CardPortraitsHits > 0) parts.Add($"card_portraits:{CardPortraitsHits}");
+            if (EventArtHits > 0) parts.Add($"event_art:{EventArtHits}");
             if (CustomCharacterIndicatorHits > 0) parts.Add($"custom_char:{CustomCharacterIndicatorHits}");
             return parts.Count == 0 ? "(no recognized domain)" : string.Join(" ", parts);
         }
@@ -96,7 +118,7 @@ public static class AssetDomainCatalog
     public static PathScan ScanPaths(IEnumerable<string> paths)
     {
         var chars = new HashSet<string>();
-        int spineHits = 0, cardArtHits = 0, cardPortraitsHits = 0, customCharHits = 0, charSelectHits = 0;
+        int spineHits = 0, cardArtHits = 0, cardPortraitsHits = 0, customCharHits = 0, charSelectHits = 0, eventArtHits = 0;
 
         foreach (var p in paths)
         {
@@ -110,8 +132,9 @@ public static class AssetDomainCatalog
             if (CardPortraitsRegex.IsMatch(p)) cardPortraitsHits++;
             if (CustomCharacterIndicatorRegex.IsMatch(p)) customCharHits++;
             if (CharSelectAssetRegex.IsMatch(p)) charSelectHits++;
+            if (EventArtRegex.IsMatch(p)) eventArtHits++;
         }
 
-        return new PathScan(chars, spineHits, cardArtHits, cardPortraitsHits, customCharHits, charSelectHits);
+        return new PathScan(chars, spineHits, cardArtHits, cardPortraitsHits, customCharHits, charSelectHits, eventArtHits);
     }
 }

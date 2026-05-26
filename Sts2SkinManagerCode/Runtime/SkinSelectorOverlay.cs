@@ -314,7 +314,12 @@ public static class SkinSelectorOverlay
             RefreshItems();
 
             var hasCharacterVariants = _byCharacter != null && _byCharacter.Values.Any(v => v.Count > 0);
-            if (_cardMods.Count > 0 || _mixedMods.Count > 0 || hasCharacterVariants) BuildAccordionPanel(screen);
+            // Build the accordion if there's anything to manage — characters, card packs, mixed
+            // mods, or any All Mods entry (event-art, skipped, or pending). Without _allMods in
+            // the condition, a user with only event-art mods (AncientRetexture pattern) would
+            // see no manager UI at all.
+            if (_cardMods.Count > 0 || _mixedMods.Count > 0 || hasCharacterVariants || _allMods.Count > 0)
+                BuildAccordionPanel(screen);
 
             EnsureLocaleSubscribed();
         }

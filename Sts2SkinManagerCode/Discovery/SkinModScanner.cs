@@ -4,7 +4,7 @@ using System.Linq;
 
 namespace Sts2SkinManager.Discovery;
 
-public enum SkinModKind { Character, Cards }
+public enum SkinModKind { Character, Cards, EventArt }
 
 public record DetectedSkinMod(
     string ModId,
@@ -185,6 +185,16 @@ public static class SkinModScanner
                 // may visually conflict with a character skin targeting the same base character.
                 var isMixed = scan.HasCharSelectAsset;
                 result.Add(new DetectedSkinMod(pckId, modDir, pck, SkinModKind.Cards, new List<string>(), previewPath, isMixed, domainsLabel));
+            }
+            else if (scan.IsEventArtMod)
+            {
+                // Event background / Ancient NPC retexture mod (AncientRetexture pattern).
+                // No character spine, no card art, no custom-character framework — just event
+                // scene backgrounds or Neow-equivalent portraits. Surfaced so the user can
+                // toggle it from the All Mods panel; no character variant dropdown applies and
+                // mount routing stays with STS2's default loader (DLL-driven asset redirect
+                // handles the actual override).
+                result.Add(new DetectedSkinMod(pckId, modDir, pck, SkinModKind.EventArt, new List<string>(), previewPath, IsMixed: false, DomainsLabel: domainsLabel));
             }
         }
         return result;

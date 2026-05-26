@@ -13,6 +13,7 @@ public enum UnifiedModCategory
     CharacterSkin,     // SkinModKind.Character variant (auto-detected or user-forced via _dll_skin_assignments)
     CardSkin,          // SkinModKind.Cards (auto-detected from pck card_art / card_portraits)
     Mixed,             // SkinModKind.Character with IsMixed=true (spine + card art in one pck)
+    EventArt,          // SkinModKind.EventArt (auto-detected from images/ancients/ or images/events/)
     NotManaged,        // User opted out via _dll_skin_skipped; SkinManager leaves it alone
     Pending,           // DLL+pck mod that SkinManager noticed but the user hasn't decided about
 }
@@ -29,6 +30,8 @@ public record UnifiedModItem(
 
 // Single source of truth for the "Other Mods" panel — DLL-shipping mods that aren't already
 // surfaced in the Character dropdown, Card tab, or Mixed tab. Contents:
+//   - Pck-detected event-art mods (AncientRetexture pattern) — no dedicated panel yet, so
+//     they surface here purely as a toggle surface (mod_list is_enabled)
 //   - User skip list (_dll_skin_skipped — content mods like Act4FinalAscent)
 //   - Pending DLL+pck mods that SkinManager noticed but haven't been routed yet
 //
@@ -53,8 +56,35 @@ public static class UnifiedModBuilder
         var seen = new HashSet<string>(System.StringComparer.OrdinalIgnoreCase);
         var customChars = new HashSet<string>(customCharacterModIds, System.StringComparer.OrdinalIgnoreCase);
 
+        // (0) Event-art mods classified by the scanner. Unlike character variants (dropdown) and
+        //     card packs (Card Skins tab), event-art mods have no dedicated panel yet — surface
+        //     them in the All Mods list so the user can toggle is_enabled. Their pck mount stays
+        //     with STS2's default loader; this entry is purely a UI/toggle surface.
+        foreach (var d in scannerDetected)
+        {
+            if (d.Kind != SkinModKind.EventArt) continue;
+            if (seen.Contains(d.ModId)) continue;
+            seen.Add(d.ModId);
+
+            var manifestPath = TryFindManifest(d.ModFolder);
+            var (name, desc) = manifestPath != null ? ReadManifest(manifestPath) : ("", "");
+
+            var dllPath = HarmonyPatchInspector.FindModDllPath(modsDir, d.ModId);
+            var definesEntities = dllPath != null && EntityDefinitionDetector.InspectFile(d.ModId, dllPath) != null;
+
+            result.Add(new UnifiedModItem(
+                ModId: d.ModId,
+                ManifestName: name,
+                ManifestDescription: desc,
+                Category: UnifiedModCategory.EventArt,
+                Character: null,
+                DefinesContentEntities: definesEntities,
+                DomainsLabel: d.DomainsLabel ?? ""));
+        }
+
         // Track every modId that the scanner classified — these are already represented in the
-        // Character dropdown, Card tab, or Mixed tab and must not appear in Other Mods.
+        // Character dropdown, Card tab, Mixed tab, or (for EventArt above) the All Mods list,
+        // and must not appear again in the Pending pass.
         foreach (var d in scannerDetected)
         {
             seen.Add(d.ModId);

@@ -71,6 +71,7 @@ public partial class MainFile : Node
         var detected = SkinModScanner.Scan(modsDir, baseCharacters, out var skippedCustom, preliminaryDllAssignments, preliminaryDllSkipped);
         var characterMods = detected.Where(d => d.Kind == SkinModKind.Character).ToList();
         var cardMods = detected.Where(d => d.Kind == SkinModKind.Cards).ToList();
+        var eventArtMods = detected.Where(d => d.Kind == SkinModKind.EventArt).ToList();
 
         if (skippedCustom.Count > 0)
         {
@@ -78,7 +79,7 @@ public partial class MainFile : Node
             foreach (var s in skippedCustom) Logger.Info($"  [skip] {s.ModId} → [{string.Join(",", s.CharacterIds)}] {s.DomainsLabel}");
         }
 
-        Logger.Info($"detected {characterMods.Count} character skin pck(s), {cardMods.Count} card pack pck(s):");
+        Logger.Info($"detected {characterMods.Count} character skin pck(s), {cardMods.Count} card pack pck(s), {eventArtMods.Count} event-art pck(s):");
         foreach (var d in characterMods)
         {
             ManagedPckRegistry.Manage(d.PckPath);
@@ -89,6 +90,10 @@ public partial class MainFile : Node
         {
             var mixedTag = d.IsMixed ? " (mixed)" : "";
             Logger.Info($"  [cards] {d.ModId}{mixedTag} {d.DomainsLabel}");
+        }
+        foreach (var d in eventArtMods)
+        {
+            Logger.Info($"  [events] {d.ModId} {d.DomainsLabel}");
         }
 
         // Dedicated mixed-domain summary — collects every IsMixed mod across both Kinds so the
@@ -298,6 +303,7 @@ public partial class MainFile : Node
                     Discovery.UnifiedModCategory.CharacterSkin => $"char→{m.Character ?? "?"}",
                     Discovery.UnifiedModCategory.CardSkin => "card",
                     Discovery.UnifiedModCategory.Mixed => $"mixed→{m.Character ?? "?"}",
+                    Discovery.UnifiedModCategory.EventArt => "events",
                     Discovery.UnifiedModCategory.NotManaged => "skipped",
                     _ => "pending",
                 };
