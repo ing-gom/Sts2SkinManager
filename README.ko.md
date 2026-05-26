@@ -57,15 +57,17 @@ STS2 실행 → 캐릭터 선택 화면.
 
 ### 모드팩 공유 (modpack preset)
 
-Save 할 때마다 Sts2SkinManager 가 `<sts2>/mods/Sts2SkinManager/modpack_preset.json` 에도 동일한 내용을 자동으로 mirror 합니다. 친구에게 본인 모드팩을 통째로 보내려면:
+Save 할 때마다 Sts2SkinManager 가 `<sts2>/mods/Sts2SkinManager/modpack_preset.preset` 에도 동일한 내용을 자동으로 mirror 합니다. 친구에게 본인 모드팩을 통째로 보내려면:
 
 1. 게임 내에서 원하는 조합으로 설정하고 `Save` 클릭.
 2. `<sts2>/mods/` 폴더를 통째로 zip (또는 공유하고 싶은 스킨/카드 모드들 + `Sts2SkinManager` 폴더).
-3. zip 전송. 받는 친구는 자기 `<sts2>/mods/` 에 압축 해제. 첫 실행 시 Sts2SkinManager 가 `modpack_preset.json` 으로부터 `skin_choices.json` 을 자동 seed — 드롭다운 선택, 카드 스킨 순서, 토글까지 그대로 적용됩니다.
+3. zip 전송. 받는 친구는 자기 `<sts2>/mods/` 에 압축 해제. 첫 실행 시 Sts2SkinManager 가 `modpack_preset.preset` 으로부터 `skin_choices.json` 을 자동 seed — 드롭다운 선택, 카드 스킨 순서, 토글까지 그대로 적용됩니다.
 
 받는 측 PC 에 preset 이 가리키는 모드가 없으면 그 항목만 조용히 `default` (기본 게임 아트) 로 떨어지고 나머지는 정상 적용.
 
-> **Nexus 배포자 주의:** 릴리즈 zip 에 `modpack_preset.json` 을 **포함하면 안 됨**. 포함될 경우 사용자가 업데이트를 설치하는 순간 본인이 가진 preset 이 덮어쓰여집니다. 표준 릴리즈 zip (DLL + manifest + README + LICENSE) 은 이미 preset 을 포함하지 않습니다.
+> **Nexus 배포자 주의:** 릴리즈 zip 에 `modpack_preset.preset` 을 **포함하면 안 됨**. 포함될 경우 사용자가 업데이트를 설치하는 순간 본인이 가진 preset 이 덮어쓰여집니다. 표준 릴리즈 zip (DLL + manifest + README + LICENSE) 은 이미 preset 을 포함하지 않습니다.
+>
+> v0.12.1 이하에서는 파일명이 `modpack_preset.json` 이었습니다. STS2 본체 ModManager 가 `mods/` 트리의 모든 `.json` 을 manifest 후보로 deserialize 시도해 매부팅마다 "missing the 'id' field" 에러가 1줄씩 기록되던 문제를 v0.12.2 에서 확장자 변경으로 해결했습니다. 기존 preset 은 첫 부팅 시 자동 rename 됩니다.
 
 ## 제약 사항
 

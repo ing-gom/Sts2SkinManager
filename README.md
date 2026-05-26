@@ -57,15 +57,17 @@ Drop a `preview.png` (or `.jpg`, `.jpeg`, `.webp`) next to your `.pck`. Sts2Skin
 
 ### Sharing your setup (modpack preset)
 
-Every time you Save, Sts2SkinManager also writes a mirror copy of your selections to `<sts2>/mods/Sts2SkinManager/modpack_preset.json`. To share your full modpack:
+Every time you Save, Sts2SkinManager also writes a mirror copy of your selections to `<sts2>/mods/Sts2SkinManager/modpack_preset.preset`. To share your full modpack:
 
 1. Make sure your latest selection is saved in-game (`Save` button).
 2. Zip your entire `<sts2>/mods/` folder (or just the skin/card mods you want to share + the `Sts2SkinManager` folder).
-3. Send the zip. Your friend unzips into their `<sts2>/mods/`. On first launch, Sts2SkinManager seeds `skin_choices.json` from the bundled `modpack_preset.json` — your dropdown picks, card skin order, and toggles all apply automatically.
+3. Send the zip. Your friend unzips into their `<sts2>/mods/`. On first launch, Sts2SkinManager seeds `skin_choices.json` from the bundled `modpack_preset.preset` — your dropdown picks, card skin order, and toggles all apply automatically.
 
 If a mod referenced by the preset isn't installed on the recipient's machine, that selection silently falls back to `default` (the base game art) and the rest is applied normally.
 
-> **For mod releases on Nexus:** the release zip must **not** include `modpack_preset.json`. Otherwise installing the update would overwrite the recipient's existing preset on their first boot after install. The standard release zip (DLL + manifest + README + LICENSE) already excludes it.
+> **For mod releases on Nexus:** the release zip must **not** include `modpack_preset.preset`. Otherwise installing the update would overwrite the recipient's existing preset on their first boot after install. The standard release zip (DLL + manifest + README + LICENSE) already excludes it.
+>
+> The file was previously named `modpack_preset.json`; v0.12.2 renamed it to silence a one-line STS2 ModManager error logged on every boot ("missing the 'id' field" — the framework walks every `.json` under `mods/` as a manifest candidate). Existing presets are auto-renamed on first boot.
 
 ## Limitations
 

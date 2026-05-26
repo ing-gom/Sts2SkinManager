@@ -4,6 +4,16 @@ All notable changes to Sts2SkinManager are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.2] - 2026-05-26
+
+### Fixed — `modpack_preset.json` no longer triggers a "missing the 'id' field" error on every boot
+- **Preset file renamed `modpack_preset.json` → `modpack_preset.preset`.** STS2's `ModManager.ReadModsInDirRecursive` walks the entire `mods/` tree and tries to deserialize every `.json` as a mod manifest. Our preset (written next to the DLL by `SkinChoicesConfig.Save()`) was being picked up, failing the manifest schema check, and producing one ERROR line in the log on every game boot:
+  ```
+  [ERROR] Mod manifest ...\modpack_preset.json is missing the 'id' field! This is not allowed. The mod will not be loaded.
+  ```
+  Behavior was unaffected — our actual DLL still loaded from `Sts2SkinManager.json` — but the error spammed user logs and surfaced as a recurring report. Switching the extension takes the file out of the framework's manifest scan entirely; the content is still JSON, and `SkinChoicesConfig.Save()` mirrors to the new path on every save as before.
+- **Auto-migration on first boot.** Any existing `modpack_preset.json` (either next to the DLL or at the pre-v0.11.6 hardcoded path `mods/Sts2SkinManager/`) is copied to `modpack_preset.preset` and the old file is deleted, so the framework error stops after one more boot. Curators who already redistributed bundles containing `modpack_preset.json` don't need to re-zip — recipient installs auto-migrate on first launch.
+
 ## [0.12.1] - 2026-05-20
 
 ### Fixed — BaseLib custom-character mods with mod-namespaced asset paths no longer hijacked as base skins

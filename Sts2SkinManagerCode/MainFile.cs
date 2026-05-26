@@ -146,26 +146,38 @@ public partial class MainFile : Node
 
         var choicesPath = Path.Combine(managerDataDir, "skin_choices.json");
 
-        // Modpack preset: a curator can ship `mods/Sts2SkinManager/modpack_preset.json` alongside
+        // Modpack preset: a curator can ship `mods/Sts2SkinManager/modpack_preset.preset` alongside
         // their mod bundle. When a fresh install has no user-side choices yet, we seed from it so
         // the recipient just unzips and plays. After seeding, the user_data file becomes the truth
         // and every Save() mirrors back to the preset path — so re-zipping `mods/` always carries
-        // the latest selection forward. Mod-update zips MUST NOT contain modpack_preset.json or
+        // the latest selection forward. Mod-update zips MUST NOT contain modpack_preset.preset or
         // they'll overwrite recipient selections.
         var selfDir = Path.GetDirectoryName(typeof(MainFile).Assembly.Location) ?? Path.Combine(modsDir, ModId);
-        var presetPath = Path.Combine(selfDir, "modpack_preset.json");
+        var presetPath = Path.Combine(selfDir, "modpack_preset.preset");
         // [NOTE] Migration block — remove from here...
-        // One-time copy from the old hardcoded path (mods/Sts2SkinManager/modpack_preset.json) to
-        // the DLL's actual directory. Needed for users who had their DLL in a non-standard location
-        // (e.g. mods/utils/Sts2SkinManager/) and ran a prior version — the old code always wrote
-        // preset to mods/Sts2SkinManager/ regardless of DLL location. Safe to delete once that
-        // transition period has passed.
-        var legacyPresetPath = Path.Combine(modsDir, ModId, "modpack_preset.json");
-        if (!File.Exists(presetPath) && File.Exists(legacyPresetPath) &&
-            !string.Equals(presetPath, legacyPresetPath, StringComparison.OrdinalIgnoreCase))
+        // v0.12.2: Renamed preset file from modpack_preset.json → modpack_preset.preset. STS2's
+        // ModManager walks the entire mods/ tree and tries to deserialize every .json as a mod
+        // manifest, so the old name produced a one-line error on every boot ("missing the 'id'
+        // field"). The error was harmless — our DLL still loaded — but it spammed user logs.
+        // The blocks below pick up any leftover .json copies and rename them, also covering the
+        // pre-v0.11.6 hardcoded-path case (mods/Sts2SkinManager/modpack_preset.json) for users
+        // whose DLL lives in a non-standard subdirectory. Safe to delete after a few releases.
+        var legacyJsonCandidates = new[]
         {
-            try { File.Copy(legacyPresetPath, presetPath); }
-            catch (Exception ex) { Logger.Warn($"preset migrate failed: {ex.Message}"); }
+            Path.Combine(selfDir, "modpack_preset.json"),
+            Path.Combine(modsDir, ModId, "modpack_preset.json"),
+        };
+        foreach (var oldJson in legacyJsonCandidates)
+        {
+            if (!File.Exists(oldJson)) continue;
+            if (string.Equals(oldJson, presetPath, StringComparison.OrdinalIgnoreCase)) continue;
+            try
+            {
+                if (!File.Exists(presetPath)) File.Copy(oldJson, presetPath);
+                File.Delete(oldJson);
+                Logger.Info($"migrated legacy preset {oldJson} → {presetPath}");
+            }
+            catch (Exception ex) { Logger.Warn($"preset migrate failed ({oldJson}): {ex.Message}"); }
         }
         // ...to here. [/NOTE]
         if (!File.Exists(choicesPath) && File.Exists(presetPath))
