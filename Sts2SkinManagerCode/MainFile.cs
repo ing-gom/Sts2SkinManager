@@ -211,8 +211,14 @@ public partial class MainFile : Node
         var mixedMods = characterMods.Where(m => m.IsMixed).ToList();
         choices.SyncMixedAddons(mixedMods.Select(m => m.ModId));
 
-        // Prune vanilla-body flags for mods no longer present (and only mixed mods are eligible).
-        choices.VanillaBodyMods.RemoveWhere(id => !mixedMods.Any(m => string.Equals(m.ModId, id, StringComparison.OrdinalIgnoreCase)));
+        // Only mixed mods that actually bundle a revertible body (ATA-style namespace scene/image
+        // paths) can use the "Selected look / Mod look" toggle — others (e.g. AncientWaifus) would
+        // get a no-op overlay, so they're excluded from the flag set and the toggle is hidden for them.
+        var vanillaBodyEligible = mixedMods
+            .Where(m => VanillaBodyOverlayBuilder.HasRevertibleBody(m.PckPath))
+            .Select(m => m.ModId)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        choices.VanillaBodyMods.RemoveWhere(id => !vanillaBodyEligible.Contains(id));
 
         choices.Save(choicesPath);
         Logger.Info($"skin_choices.json → {choicesPath}");
@@ -325,7 +331,7 @@ public partial class MainFile : Node
             ? Sts2SettingsWriter.ReadModEnabledState(settings)
             : new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
 
-        SkinSelectorOverlay.Configure(choicesPath, byCharacter, cardMods, mixedMods, allMods, baseCharacters, bootModEnabled);
+        SkinSelectorOverlay.Configure(choicesPath, byCharacter, cardMods, mixedMods, allMods, baseCharacters, bootModEnabled, vanillaBodyEligible);
         SkinSelectorOverlay.SetWatcher(_watcher);
 
         // Defer ModConfig registration so the framework's own Initialize can run first.

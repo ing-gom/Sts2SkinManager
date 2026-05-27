@@ -4,6 +4,23 @@ All notable changes to Sts2SkinManager are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.0] - 2026-05-27
+
+### Added — in-game toggle for "use the selected look, keep this mod's cards" (mixed mods)
+- **The 0.14.0 "keep cards, change the body" mechanism now has a UI** — a per-row **🧍 toggle** on each mixed-mod row in the Character Select → Skin Manager → mixed-mods panel. Previously this was config-only (you had to hand-edit `_vanilla_body_mods` in `skin_choices.json`), so users hit the all-or-nothing behaviour of the mixed checkbox — enabling a mod like [ATA IronClad](https://www.nexusmods.com/slaythespire2/mods/) forced *both* its body and its card art, with no way to keep just the cards. The toggle surfaces the feature where users actually look.
+- **Clarified, more powerful semantics — the body follows your Character Select choice, not just vanilla.** The overlay re-points the mod's own (DLL-forced) character paths back to the *standard* character paths, so whatever you pick in the dropdown above wins the body:
+  - toggle **on** → **🧍 Selected look**: the body/appearance follows your Character Select pick — vanilla when "default", or **another installed skin** when one is selected — while this mod's card art is kept (its DLL stays loaded). Verified in-game: ATA IronClad cards over a *different* Ironclad skin's body, or over vanilla.
+  - toggle **off** → **🧍 Mod look**: the mod's own body + cards (unchanged full-skin behaviour).
+- **The toggle only appears for mixed mods that actually bundle a revertible body** (ATA-style namespace scene/image paths, e.g. `…/scenes/creature_visuals/{char}.tscn.remap`, the top-panel icon / char-select / multiplayer-hand imports). Mixed mods with no such paths (e.g. AncientWaifus) would get a no-op overlay, so the toggle is hidden for them and they're excluded from the `_vanilla_body_mods` set.
+- **Localised in all 16 languages** (label + tooltip).
+
+### Changed — mixed / card-skin row layout polish
+- The look toggle sits on a second line **directly beneath the mod name**; the row's other controls (checkbox, order number, rename, reorder arrows) are **vertically centred** against that two-line height instead of top-aligning.
+- Order numbers lost their trailing `.` (`1.` → `1`) and gained a small gap before the name, in **both** the card-skin and mixed-mod panels.
+
+### Fixed
+- Toggling the look state now updates the shared **Save / Discard** buttons' enabled state and the dirty `*` marker (the toggle's change was previously not counted as a pending edit).
+
 ## [0.14.1] - 2026-05-27
 
 ### Performance — much faster game boot (no more full base-pack byte-scan at startup)

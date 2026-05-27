@@ -16,6 +16,8 @@ public static class SkinSelectorOverlay
     private static Dictionary<string, List<DetectedSkinMod>>? _byCharacter;
     private static List<DetectedSkinMod> _cardMods = new();
     private static List<DetectedSkinMod> _mixedMods = new();
+    // Mixed mods that bundle a revertible body (ATA-style) — only these show the look toggle.
+    private static IReadOnlySet<string> _vanillaBodyEligible = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
     private static List<UnifiedModItem> _allMods = new();
     private static IReadOnlySet<string> _baseCharacters = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
@@ -63,6 +65,9 @@ public static class SkinSelectorOverlay
     // and triggers the modal.
     private static CardPacksConfig? _pendingCardPacks;
     private static CardPacksConfig? _pendingMixedAddons;
+    // Mixed mods the user flagged "vanilla body (keep cards)" — surfaced as a per-row 🧍 toggle in
+    // the mixed-addon panel. Committed to choices.VanillaBodyMods on OnSave (→ _vanilla_body_mods).
+    private static HashSet<string> _pendingVanillaBody = new(StringComparer.OrdinalIgnoreCase);
     private static readonly Dictionary<string, string> _pendingActiveByCharacter = new(StringComparer.OrdinalIgnoreCase);
     // Per-mod pending override from the All Mods tab. The action sentinel encodes the user's
     // chosen target classification — currently only "skip" is reachable from the UI (via the
@@ -74,6 +79,7 @@ public static class SkinSelectorOverlay
     // Stays dirty until the user restarts (which re-captures the snapshot). OnDiscard restores everything to this.
     private static CardPacksConfig? _bootSnapshotCardPacks;
     private static CardPacksConfig? _bootSnapshotMixedAddons;
+    private static HashSet<string> _bootSnapshotVanillaBody = new(StringComparer.OrdinalIgnoreCase);
     private static readonly Dictionary<string, string> _bootSnapshotActive = new(StringComparer.OrdinalIgnoreCase);
     private static readonly Dictionary<string, string> _bootSnapshotDllAssignments = new(StringComparer.OrdinalIgnoreCase);
     private static readonly HashSet<string> _bootSnapshotDllSkipped = new(StringComparer.OrdinalIgnoreCase);
@@ -102,7 +108,8 @@ public static class SkinSelectorOverlay
         List<DetectedSkinMod> mixedMods,
         List<UnifiedModItem>? allMods = null,
         IReadOnlySet<string>? baseCharacters = null,
-        IReadOnlyDictionary<string, bool>? bootModEnabled = null)
+        IReadOnlyDictionary<string, bool>? bootModEnabled = null,
+        IReadOnlySet<string>? vanillaBodyEligible = null)
     {
         _choicesPath = choicesPath;
         _byCharacter = byCharacter;
@@ -110,12 +117,15 @@ public static class SkinSelectorOverlay
         _mixedMods = mixedMods;
         _allMods = allMods ?? new List<UnifiedModItem>();
         _baseCharacters = baseCharacters ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        _vanillaBodyEligible = vanillaBodyEligible ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         var initial = SkinChoicesConfig.LoadOrEmpty(_choicesPath);
         _pendingCardPacks = ClonePacks(initial.CardPacks);
         _pendingMixedAddons = ClonePacks(initial.MixedAddons);
+        _pendingVanillaBody = new HashSet<string>(initial.VanillaBodyMods, StringComparer.OrdinalIgnoreCase);
         _bootSnapshotCardPacks = ClonePacks(initial.CardPacks);
         _bootSnapshotMixedAddons = ClonePacks(initial.MixedAddons);
+        _bootSnapshotVanillaBody = new HashSet<string>(initial.VanillaBodyMods, StringComparer.OrdinalIgnoreCase);
         _bootSnapshotActive.Clear();
         foreach (var kv in initial.Characters) _bootSnapshotActive[kv.Key] = kv.Value.Active ?? "default";
         _bootSnapshotDllAssignments.Clear();
@@ -926,12 +936,13 @@ public static class SkinSelectorOverlay
 
         var orderLabel = new Label
         {
-            Text = $"{index + 1}.",
+            Text = $"{index + 1}",
             CustomMinimumSize = new Vector2(32, 32),
             VerticalAlignment = VerticalAlignment.Center,
             HorizontalAlignment = HorizontalAlignment.Right,
         };
         hbox.AddChild(orderLabel);
+        hbox.AddChild(new Control { CustomMinimumSize = new Vector2(12, 0) }); // gap between order number and name
 
         var aliases = LoadAliases();
         var label = new Label
@@ -1325,6 +1336,27 @@ public static class SkinSelectorOverlay
         var check = new CheckBox { ButtonPressed = enabled, CustomMinimumSize = new Vector2(32, 32) };
         hbox.AddChild(check);
 
+        // "Selected look / Mod look" toggle — only for mixed mods that bundle a revertible body
+        // (ATA-style). Hidden for mods where the overlay would be a no-op (e.g. AncientWaifus).
+        // Label names whose appearance the body uses: on = the character-select dropdown choice
+        // ("🧍 Selected look", vanilla or another skin), off = this mod's own ("🧍 Mod look").
+        // Either way the mod's card art is kept (its DLL stays loaded); only the body is governed.
+        string VbText(bool on) => $"🧍 {Strings.Get(on ? "vanilla_body_on" : "vanilla_body_off")}";
+        Button? vbToggle = null;
+        if (_vanillaBodyEligible.Contains(modId))
+        {
+            var vbActive = _pendingVanillaBody.Contains(modId);
+            vbToggle = new Button
+            {
+                Text = VbText(vbActive),
+                ToggleMode = true,
+                ButtonPressed = vbActive,
+                CustomMinimumSize = new Vector2(96, 32),
+                TooltipText = Strings.Get("mixed_vanilla_body_tooltip"),
+            };
+            // Added to the name column (beneath the name) further down, not inline in the main row.
+        }
+
         var status = new Label
         {
             CustomMinimumSize = new Vector2(28, 32),
@@ -1335,7 +1367,7 @@ public static class SkinSelectorOverlay
 
         var orderLabel = new Label
         {
-            Text = $"{index + 1}.",
+            Text = $"{index + 1}",
             CustomMinimumSize = new Vector2(32, 32),
             VerticalAlignment = VerticalAlignment.Center,
             HorizontalAlignment = HorizontalAlignment.Right,
@@ -1353,7 +1385,6 @@ public static class SkinSelectorOverlay
         };
         label.MouseEntered += () => OnCardRowHoverStart(modId);
         label.MouseExited += () => OnCardRowHoverEnd(modId);
-        hbox.AddChild(label);
 
         var aliasEdit = new LineEdit
         {
@@ -1361,7 +1392,16 @@ public static class SkinSelectorOverlay
             PlaceholderText = Strings.Get("alias_placeholder"),
             Visible = false,
         };
-        hbox.AddChild(aliasEdit);
+
+        // Name column: mod name on top, the look toggle (if any) directly beneath it. Keeping the
+        // toggle inside this column (instead of a full-width second row) lets the side controls
+        // stay vertically centred against the taller two-line height.
+        var nameCol = new VBoxContainer { CustomMinimumSize = new Vector2(248, 0) };
+        nameCol.AddChild(label);
+        nameCol.AddChild(aliasEdit);
+        if (vbToggle != null) nameCol.AddChild(vbToggle);
+        hbox.AddChild(new Control { CustomMinimumSize = new Vector2(12, 0) }); // gap between order number and name
+        hbox.AddChild(nameCol);
 
         var editBtn = new Button { Text = "✏", CustomMinimumSize = new Vector2(28, 32), TooltipText = Strings.Get("alias_edit_tooltip") };
         hbox.AddChild(editBtn);
@@ -1419,6 +1459,12 @@ public static class SkinSelectorOverlay
             label.Modulate = isOn ? Colors.White : new Color(0.55f, 0.55f, 0.55f);
             dragHandle.Modulate = isOn ? Colors.White : new Color(0.55f, 0.55f, 0.55f);
             orderLabel.Modulate = isOn ? Colors.White : new Color(0.55f, 0.55f, 0.55f);
+            // Vanilla-body only applies while the mod is on (its pck must stay mounted for cards).
+            if (vbToggle is { } vb)
+            {
+                vb.Disabled = !isOn;
+                vb.Modulate = isOn ? Colors.White : new Color(0.4f, 0.4f, 0.4f);
+            }
         }
         ApplyVisual(enabled);
 
@@ -1428,6 +1474,13 @@ public static class SkinSelectorOverlay
             ApplyVisual(isOn);
         };
 
+        if (vbToggle is { } vbTog)
+            vbTog.Toggled += isOn =>
+            {
+                OnVanillaBodyToggle(modId, isOn);
+                vbTog.Text = VbText(isOn);
+            };
+
         var upBtn = new Button { Text = "↑", CustomMinimumSize = new Vector2(32, 32), Disabled = index == 0 };
         upBtn.Pressed += () => MoveMixedAddon(modId, -1);
         hbox.AddChild(upBtn);
@@ -1435,6 +1488,12 @@ public static class SkinSelectorOverlay
         var downBtn = new Button { Text = "↓", CustomMinimumSize = new Vector2(32, 32), Disabled = index == total - 1 };
         downBtn.Pressed += () => MoveMixedAddon(modId, +1);
         hbox.AddChild(downBtn);
+
+        // Vertically centre every side control against the name column's height (taller when the
+        // look toggle sits beneath the name), so they don't top-align.
+        foreach (var child in hbox.GetChildren())
+            if (child is Control c && c != nameCol)
+                c.SizeFlagsVertical = Control.SizeFlags.ShrinkCenter;
 
         return hbox;
     }
@@ -1452,6 +1511,20 @@ public static class SkinSelectorOverlay
             UpdateCardPackHeader();
         }
         catch (Exception ex) { MainFile.Logger.Warn($"mixed addon toggle error: {ex.Message}"); }
+    }
+
+    private static void OnVanillaBodyToggle(string modId, bool isOn)
+    {
+        try
+        {
+            if (isOn) _pendingVanillaBody.Add(modId);
+            else _pendingVanillaBody.Remove(modId);
+            MainFile.Logger.Info($"vanilla-body pending toggle: {modId} → {isOn}");
+            // Re-evaluate dirty state so the shared Save/Discard buttons + dirty mark update.
+            UpdateMixedHeader();
+            UpdateCardPackHeader();
+        }
+        catch (Exception ex) { MainFile.Logger.Warn($"vanilla-body toggle error: {ex.Message}"); }
     }
 
     private static void MoveMixedAddon(string modId, int delta)
@@ -1507,6 +1580,7 @@ public static class SkinSelectorOverlay
             }
             if (_pendingCardPacks != null) choices.CardPacks = ClonePacks(_pendingCardPacks);
             if (_pendingMixedAddons != null) choices.MixedAddons = ClonePacks(_pendingMixedAddons);
+            choices.VanillaBodyMods = new HashSet<string>(_pendingVanillaBody, StringComparer.OrdinalIgnoreCase);
 
             // Apply All Mods reclassifications. Action sentinel encodes target:
             //   "auto"        → clear overrides; scanner re-classifies on next boot
@@ -1596,6 +1670,7 @@ public static class SkinSelectorOverlay
             _pendingModEnabled.Clear();
             _pendingCardPacks = ClonePacks(_bootSnapshotCardPacks);
             if (_bootSnapshotMixedAddons != null) _pendingMixedAddons = ClonePacks(_bootSnapshotMixedAddons);
+            _pendingVanillaBody = new HashSet<string>(_bootSnapshotVanillaBody, StringComparer.OrdinalIgnoreCase);
 
             var choices = SkinChoicesConfig.LoadOrEmpty(_choicesPath);
             foreach (var kv in _bootSnapshotActive)
@@ -1604,6 +1679,7 @@ public static class SkinSelectorOverlay
             }
             choices.CardPacks = ClonePacks(_bootSnapshotCardPacks);
             if (_bootSnapshotMixedAddons != null) choices.MixedAddons = ClonePacks(_bootSnapshotMixedAddons);
+            choices.VanillaBodyMods = new HashSet<string>(_bootSnapshotVanillaBody, StringComparer.OrdinalIgnoreCase);
             choices.Save(_choicesPath);
 
             // Restore settings.save card-pack state too so the next launch matches boot.
@@ -1653,6 +1729,8 @@ public static class SkinSelectorOverlay
                 if (!_bootSnapshotMixedAddons.Enabled.TryGetValue(kv.Key, out var v) || v != kv.Value) return true;
             }
         }
+
+        if (!_pendingVanillaBody.SetEquals(_bootSnapshotVanillaBody)) return true;
 
         var disk = SkinChoicesConfig.LoadOrEmpty(_choicesPath);
         foreach (var (character, choice) in disk.Characters)

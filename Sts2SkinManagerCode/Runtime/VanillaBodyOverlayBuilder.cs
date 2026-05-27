@@ -100,6 +100,27 @@ public static class VanillaBodyOverlayBuilder
         return outPath;
     }
 
+    // True if this mod's pck has any character body path the overlay can revert (a scene remap under
+    // a character folder, or a character image import). Used to hide the "Selected look / Mod look"
+    // toggle for mixed mods that bundle no revertible body (e.g. AncientWaifus) — the toggle would be
+    // a no-op there. Index-only read (cheap); the overlay's targets are real packed entries.
+    public static bool HasRevertibleBody(string modPckPath)
+    {
+        var idx = PckFileExtractor.TryReadIndex(modPckPath);
+        if (idx == null) return false;
+        foreach (var p in idx.Keys)
+        {
+            if (IsCardDomain(p)) continue;
+            if (p.EndsWith(".tscn.remap", StringComparison.OrdinalIgnoreCase)
+                && CharSceneFolders.Any(f => p.Contains(f, StringComparison.OrdinalIgnoreCase)))
+                return true;
+            if (p.EndsWith(".png.import", StringComparison.OrdinalIgnoreCase)
+                && CharImageMarkers.Any(m => p.Contains(m, StringComparison.OrdinalIgnoreCase)))
+                return true;
+        }
+        return false;
+    }
+
     private static string BaseName(string p) => p.Substring(p.LastIndexOf('/') + 1);
 
     private static bool IsCardDomain(string p)
