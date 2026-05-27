@@ -27,7 +27,7 @@ public static class SkinModScanner
         var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var basePck = Path.Combine(gameDir, "SlayTheSpire2.pck");
         if (!File.Exists(basePck)) return result;
-        var scan = AssetDomainCatalog.ScanPaths(PckPathReader.ReadAsciiRuns(basePck));
+        var scan = AssetDomainCatalog.ScanPaths(PckPathReader.ReadAssetPaths(basePck));
         foreach (var c in scan.Characters) result.Add(c);
         return result;
     }

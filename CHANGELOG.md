@@ -4,6 +4,12 @@ All notable changes to Sts2SkinManager are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.1] - 2026-05-27
+
+### Performance — much faster game boot (no more full base-pack byte-scan at startup)
+- **Base-character detection now reads the base game pack's *directory index* instead of byte-scanning the entire ~1.77 GB `SlayTheSpire2.pck`.** `SkinModScanner.ScanBaseCharacters` previously fed the whole pack through `PckPathReader.ReadAsciiRuns` (`File.ReadAllBytes` + a pass over every byte) just to find the `animations/characters/{char}/` spine paths — on the main thread, before the main menu, every launch. It now uses `PckFileExtractor.TryReadIndex` (added in 0.14.0), which seeks straight to the path table and reads only a few MB. On a heavily-modded install, measured time-to-main-menu dropped from ~36–46 s to ~22–29 s. Falls back to the byte-scan automatically if a pack can't be parsed as a standalone GDPC.
+- **Mod-pack classification is intentionally left on the byte-scan.** Some mixed mods (e.g. AncientWaifus, ATA IronClad) reference their spine / card-portrait paths from inside file *contents* (scenes, atlases) rather than as packed file paths, which the directory index does not expose — switching those to index-only mis-classified them. Only base-character detection (the single 1.77 GB read, the dominant cost) was migrated.
+
 ## [0.14.0] - 2026-05-27
 
 ### Added — "vanilla body, keep cards" for mixed character+card mods (config-only; UI to follow)
