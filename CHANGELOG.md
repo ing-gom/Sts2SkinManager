@@ -4,6 +4,24 @@ All notable changes to Sts2SkinManager are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.0] - 2026-05-27
+
+### Added — "vanilla body, keep cards" for mixed character+card mods (config-only; UI to follow)
+- **Mixed mods that bundle a character reskin *and* custom card art (e.g. [ATA IronClad](https://www.nexusmods.com/slaythespire2/mods/), a RitsuLib/Lance-based mod) can now keep their card art while reverting the *character body* to vanilla.** Previously this combination was impossible: such mods drive both the body and the card art from their own DLL (Harmony path-rewrites into `res://{Mod}/...`), and the card overrides are owned by the same character registration, so the only states were "full mod skin (body + cards)" or "mod disabled (neither)". There was no way to say "I like the custom card art but want the original character".
+- **New mechanism — a non-destructive runtime overlay.** When a mod id is listed under the new `_vanilla_body_mods` key in `skin_choices.json`, SkinManager keeps the mod's DLL loaded (so its card art stays) and, on a deferred next-frame timer (after every mod's pck has mounted), builds and mounts a small generated overlay pck that re-points the mod's own character paths back to the vanilla base game:
+  - character **scene** remaps (`scenes/creature_visuals/{char}.tscn`, `…/merchant/characters/{char}_merchant.tscn`, `…/rest_site/characters/{char}_rest_site.tscn`, `…/ui/character_icons/{char}_icon.tscn`, `…/character_select/char_select_bg_{char}.tscn`) → the vanilla `res://scenes/…` scene, matched by basename so the differing folder layout (`scenes/character_select/` vs `scenes/screens/char_select/`) is handled automatically;
+  - character **image** imports (top-panel icon + outline, char-select portrait, the four multiplayer-hand textures) → the vanilla `.png.import`, which already targets the vanilla `.ctex` shipped in the base pck.
+  - Card art paths (`images/atlases/*cards*`, `card_portraits`) are deliberately left untouched, so the mod's DLL keeps injecting its custom card visuals. **The mod's own files are never modified** — the overlay lives under `user_data/Sts2SkinManager/overlays/` and is regenerated each boot.
+- **Why redirect the *scene* and not just the spine leaf assets:** overriding only the leaf `.spskel`/`.spatlas`/`.ctex` reverts the texture/skeleton but leaves the mod's scene node transform in place, so the vanilla body renders at the wrong scale. Redirecting at the `.tscn.remap` level loads the complete vanilla scene (node scale included), keeping everything consistent.
+- **No dedicated UI yet** — enable per mod by adding its id to `_vanilla_body_mods` in `skin_choices.json` (e.g. `"_vanilla_body_mods": ["ATA_IronClad"]`). A "vanilla body (keep cards)" toggle on the Character Select panel is the planned next step. (This mirrors how EventArt shipped in 0.13.0: backend first, surfaced through existing config, dedicated UI as a follow-up.)
+
+### Fixed — `PckFileExtractor` can now read large packs (e.g. `SlayTheSpire2.pck`)
+- **The directory locator now reads the pack-format-v3 header's directory offset first, falling back to the backward tail-scan only when that offset is missing/implausible.** The tail-scan inspected just the last 512 KB, which cannot reach the directory start of the base game pack (15k+ entries → >1 MB directory); `TryReadIndex` returned null for it. This was a no-op before 0.14.0 (nothing read the base pack), but the vanilla-body overlay builder needs the base pack's index to resolve vanilla counterparts. Mod-pack reads are unchanged — the header path resolves to the same directory the scan would have found.
+
+### Internal
+- New `PckFileWriter` — a minimal Godot 4.5 PCK (pack format v3) writer (header + 16-byte-aligned data + tail directory, `PACK_REL_FILEBASE`), reverse-engineered and validated against `ATA_IronClad.pck` with a byte-identical 283-entry round-trip before porting to C#.
+- New `VanillaBodyOverlayBuilder` — reads a mod pck + the base pck and emits the redirect overlay described above.
+
 ## [0.13.0] - 2026-05-26
 
 ### Added — event-background / Ancient retexture mods are now a managed mod kind

@@ -211,6 +211,9 @@ public partial class MainFile : Node
         var mixedMods = characterMods.Where(m => m.IsMixed).ToList();
         choices.SyncMixedAddons(mixedMods.Select(m => m.ModId));
 
+        // Prune vanilla-body flags for mods no longer present (and only mixed mods are eligible).
+        choices.VanillaBodyMods.RemoveWhere(id => !mixedMods.Any(m => string.Equals(m.ModId, id, StringComparison.OrdinalIgnoreCase)));
+
         choices.Save(choicesPath);
         Logger.Info($"skin_choices.json → {choicesPath}");
         Logger.Info($"card pack state: ordering=[{string.Join(", ", choices.CardPacks.Ordering)}], enabled={{ {string.Join(", ", choices.CardPacks.Enabled.Select(kv => $"{kv.Key}={kv.Value}"))} }}");
@@ -265,6 +268,9 @@ public partial class MainFile : Node
             if (choices.MixedAddons.Enabled.TryGetValue(m.ModId, out var en) && en)
                 keepDllModIds.Add(m.ModId);
         }
+        // Vanilla-body mods keep their DLL loaded so their custom cards stay; the body is reverted
+        // by the overlay mounted below, not by blocking the DLL.
+        foreach (var modId in choices.VanillaBodyMods) keepDllModIds.Add(modId);
         foreach (var d in characterMods)
         {
             if (!keepDllModIds.Contains(d.ModId))
@@ -326,6 +332,31 @@ public partial class MainFile : Node
         if (Engine.GetMainLoop() is SceneTree tree)
         {
             tree.CreateTimer(0.0).Timeout += ModConfigBridge.TryRegister;
+
+            // Vanilla-body overlays for mixed mods set to "keep cards, vanilla body". Deferred:
+            // SkinManager loads first in mod_list, so a target mod's own pck isn't mounted yet
+            // during Run(). A next-frame timer fires after every mod has loaded, so the overlay
+            // mounts AFTER the mod's pck and wins the overlapping character paths (card paths are
+            // left untouched, so the mod's DLL keeps providing its custom card art).
+            var vanillaBodyMods = characterMods.Where(m => choices.VanillaBodyMods.Contains(m.ModId)).ToList();
+            if (vanillaBodyMods.Count > 0)
+            {
+                Logger.Info($"vanilla-body: {vanillaBodyMods.Count} mod(s) flagged [{string.Join(",", vanillaBodyMods.Select(m => m.ModId))}] — mounting vanilla-body overlay(s) after mod pcks load");
+                var baseGamePck = Path.Combine(gameDir, "SlayTheSpire2.pck");
+                var overlayDir = Path.Combine(managerDataDir, "overlays");
+                tree.CreateTimer(0.0).Timeout += () =>
+                {
+                    foreach (var m in vanillaBodyMods)
+                    {
+                        try
+                        {
+                            var overlayPath = VanillaBodyOverlayBuilder.Build(m.PckPath, baseGamePck, overlayDir);
+                            if (overlayPath != null) RuntimeMountService.MountVariantPck(overlayPath);
+                        }
+                        catch (Exception ex) { Logger.Warn($"vanilla-body overlay failed for {m.ModId}: {ex.Message}"); }
+                    }
+                };
+            }
 
             // After all other mods finish their Harmony patches, sweep for DLL-driven character
             // skins (Hcxmmx_King_Skin pattern) — mods whose pck has no standard skin paths but

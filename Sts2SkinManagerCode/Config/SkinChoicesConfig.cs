@@ -54,6 +54,12 @@ public class SkinChoicesConfig
     // prompts so the modal doesn't re-pop on every boot.
     public HashSet<string> DllSkinSkipped { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
+    // Mixed mods (skin + cards in one DLL/pck, e.g. ATA_IronClad) the user set to "vanilla body,
+    // keep cards". For these, MainFile keeps the mod's DLL loaded (so its custom card art stays)
+    // and mounts a generated overlay (VanillaBodyOverlayBuilder) that re-points the mod's character
+    // scene/image paths to vanilla base assets. Persisted as _vanilla_body_mods.
+    public HashSet<string> VanillaBodyMods { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
     private static readonly JsonSerializerOptions JsonOpts = new()
     {
         WriteIndented = true,
@@ -120,6 +126,13 @@ public class SkinChoicesConfig
                 root.Remove("_dll_skin_skipped");
             }
 
+            if (root.TryGetPropertyValue("_vanilla_body_mods", out var vbNode) && vbNode != null)
+            {
+                var deserialized = JsonSerializer.Deserialize<List<string>>(vbNode.ToJsonString(), JsonOpts);
+                if (deserialized != null) cfg.VanillaBodyMods = new HashSet<string>(deserialized, StringComparer.OrdinalIgnoreCase);
+                root.Remove("_vanilla_body_mods");
+            }
+
             root.Remove("_preview_visible"); // legacy v0.4.0-dev key, ignored
 
             cfg.Characters = JsonSerializer.Deserialize<Dictionary<string, CharacterSkinChoice>>(root.ToJsonString(), JsonOpts) ?? new(StringComparer.OrdinalIgnoreCase);
@@ -167,6 +180,12 @@ public class SkinChoicesConfig
         {
             var node = JsonNode.Parse(JsonSerializer.Serialize(DllSkinSkipped.ToList(), JsonOpts));
             if (node != null) root["_dll_skin_skipped"] = node;
+        }
+
+        if (VanillaBodyMods.Count > 0)
+        {
+            var node = JsonNode.Parse(JsonSerializer.Serialize(VanillaBodyMods.ToList(), JsonOpts));
+            if (node != null) root["_vanilla_body_mods"] = node;
         }
 
         var json = root.ToJsonString(JsonOpts);

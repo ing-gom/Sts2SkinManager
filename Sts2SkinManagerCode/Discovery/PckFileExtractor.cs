@@ -43,13 +43,22 @@ public static class PckFileExtractor
             br.ReadUInt32(); br.ReadUInt32(); br.ReadUInt32();    // godot version triple
 
             long fileBase = 0;
+            long headerDirOffset = 0;
             if (packFormat >= 2)
             {
                 br.ReadUInt32();              // pack flags (rel_filebase ignored — STS2 .pcks are standalone)
                 fileBase = br.ReadInt64();
+                headerDirOffset = br.ReadInt64(); // v3 stores the absolute directory offset here
             }
 
-            var dirStart = LocateDirectoryStart(fs, fileBase);
+            // Prefer the header-stored directory offset. The backward tail-scan only inspects the
+            // last 512 KB, which can't reach the directory start of large packs like
+            // SlayTheSpire2.pck (15k+ entries → >1 MB directory). Fall back to the scan when the
+            // header value is missing or implausible (covers v3 trailers that store a bad offset).
+            var dirStart = -1L;
+            if (headerDirOffset > 0 && headerDirOffset + 8 <= fs.Length && LooksLikeDirectory(fs, br, headerDirOffset))
+                dirStart = headerDirOffset;
+            if (dirStart < 0) dirStart = LocateDirectoryStart(fs, fileBase);
             if (dirStart < 0) return null;
 
             fs.Seek(dirStart, SeekOrigin.Begin);
@@ -85,6 +94,28 @@ public static class PckFileExtractor
         {
             return null;
         }
+    }
+
+    // Validates that `offset` plausibly begins a directory: a sane file_count followed by a first
+    // entry whose path length is sane (4-aligned) and whose bytes are printable ASCII. Used to
+    // trust the header-stored directory offset before falling back to the heuristic tail-scan.
+    // Caller re-seeks to the directory before reading entries, so this leaves the stream wherever.
+    private static bool LooksLikeDirectory(FileStream fs, BinaryReader br, long offset)
+    {
+        try
+        {
+            fs.Seek(offset, SeekOrigin.Begin);
+            var fileCount = br.ReadUInt32();
+            if (fileCount < 1 || fileCount > 1_000_000) return false;
+            var plen = br.ReadUInt32();
+            if (plen < 4 || plen > 4096 || plen % 4 != 0) return false;
+            var pathBytes = br.ReadBytes((int)plen);
+            if (pathBytes.Length != plen) return false;
+            foreach (var b in pathBytes)
+                if (b != 0 && (b < 0x20 || b > 0x7e)) return false; // printable ASCII or NUL pad
+            return true;
+        }
+        catch { return false; }
     }
 
     // Scans the tail of the file (last TailScanWindow bytes) backward at 4-byte stride looking for

@@ -23,3 +23,6 @@ local.props
 # OS
 .DS_Store
 Thumbs.db
+
+# Prototyping scratch (pck format reversing tools; C# implements the production path)
+tools/
