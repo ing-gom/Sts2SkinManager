@@ -79,6 +79,23 @@ public static class Strings
             ["all_mods_toggle_tooltip"] = "Whether this mod is currently loaded by the game. Toggle off to deactivate a character variant.",
             ["card_panel_empty"] = "No card skin mods detected.",
             ["mixed_panel_empty"] = "No mixed mods (spine + extras) detected.",
+            ["applied_tab_title"] = "Applied",
+            ["tab_cards"] = "Cards",
+            ["tab_mixed"] = "Mixed",
+            ["tab_other"] = "Other",
+            ["applied_copy"] = "📋 Copy",
+            ["applied_copied"] = "✓ Copied",
+            ["applied_copy_tooltip"] = "Copy this summary (handy for bug reports).",
+            ["applied_pending_note"] = "Pending changes — restart to apply.",
+            ["applied_characters"] = "Characters",
+            ["applied_custom_characters"] = "Custom characters",
+            ["applied_vanilla"] = "Vanilla (default)",
+            ["applied_none"] = "None",
+            ["applied_after_restart"] = "after restart",
+            ["applied_dll_tag"] = "DLL",
+            ["applied_not_mounted"] = "not mounted — check load order / logs",
+            ["applied_other_disabled"] = "Disabled mods",
+            ["applied_all_vanilla"] = "All characters use the default look.",
         },
         ["KOR"] = new()
         {
@@ -130,9 +147,29 @@ public static class Strings
             ["all_mods_toggle_tooltip"] = "이 mod 가 게임에 로드되어 있는지 표시. 캐릭터 변형을 끄려면 체크 해제.",
             ["card_panel_empty"] = "감지된 카드 스킨 mod 없음.",
             ["mixed_panel_empty"] = "감지된 혼합 mod (스파인 + 추가요소) 없음.",
+            ["applied_tab_title"] = "적용됨",
+            ["tab_cards"] = "카드",
+            ["tab_mixed"] = "혼합",
+            ["tab_other"] = "기타",
+            ["applied_copy"] = "📋 복사",
+            ["applied_copied"] = "✓ 복사됨",
+            ["applied_copy_tooltip"] = "이 요약을 복사 (버그 신고할 때 편해요).",
+            ["applied_pending_note"] = "변경 대기 중 — 재시작하면 적용돼요.",
+            ["applied_characters"] = "캐릭터",
+            ["applied_custom_characters"] = "커스텀 캐릭터",
+            ["applied_vanilla"] = "기본 (바닐라)",
+            ["applied_none"] = "없음",
+            ["applied_after_restart"] = "재시작 후",
+            ["applied_dll_tag"] = "DLL",
+            ["applied_not_mounted"] = "마운트 안 됨 — 로드 순서 / 로그 확인",
+            ["applied_other_disabled"] = "비활성화된 모드",
+            ["applied_all_vanilla"] = "모든 캐릭터가 기본 외형을 사용 중이에요.",
         },
         ["JPN"] = new()
         {
+            ["applied_copy"] = "📋 コピー",
+            ["applied_copied"] = "✓ コピーしました",
+            ["applied_copy_tooltip"] = "この概要をコピー（不具合報告に便利）。",
             ["skin_label"] = "スキン",
             ["no_variants"] = "検出されたスキンなし",
             ["not_configured"] = "設定なし",
@@ -160,6 +197,9 @@ public static class Strings
         },
         ["ZHS"] = new()
         {
+            ["applied_copy"] = "📋 复制",
+            ["applied_copied"] = "✓ 已复制",
+            ["applied_copy_tooltip"] = "复制此摘要（方便提交错误报告）。",
             ["skin_label"] = "皮肤",
             ["no_variants"] = "未检测到皮肤",
             ["not_configured"] = "无配置",
@@ -187,6 +227,9 @@ public static class Strings
         },
         ["ZHT"] = new()
         {
+            ["applied_copy"] = "📋 複製",
+            ["applied_copied"] = "✓ 已複製",
+            ["applied_copy_tooltip"] = "複製此摘要（方便回報問題）。",
             ["skin_label"] = "皮膚",
             ["no_variants"] = "未偵測到皮膚",
             ["not_configured"] = "無配置",
@@ -214,6 +257,9 @@ public static class Strings
         },
         ["DEU"] = new()
         {
+            ["applied_copy"] = "📋 Kopieren",
+            ["applied_copied"] = "✓ Kopiert",
+            ["applied_copy_tooltip"] = "Diese Übersicht kopieren (praktisch für Fehlerberichte).",
             ["skin_label"] = "Skin",
             ["no_variants"] = "Keine erkannten Skins",
             ["not_configured"] = "Keine Konfiguration",
@@ -241,6 +287,9 @@ public static class Strings
         },
         ["FRA"] = new()
         {
+            ["applied_copy"] = "📋 Copier",
+            ["applied_copied"] = "✓ Copié",
+            ["applied_copy_tooltip"] = "Copier ce récapitulatif (utile pour les rapports de bug).",
             ["skin_label"] = "Skin",
             ["no_variants"] = "Aucun skin détecté",
             ["not_configured"] = "Aucune configuration",
@@ -268,6 +317,9 @@ public static class Strings
         },
         ["SPA"] = new()
         {
+            ["applied_copy"] = "📋 Copiar",
+            ["applied_copied"] = "✓ Copiado",
+            ["applied_copy_tooltip"] = "Copiar este resumen (útil para informes de errores).",
             ["skin_label"] = "Skin",
             ["no_variants"] = "Ningún skin detectado",
             ["not_configured"] = "Sin configuración",
@@ -295,6 +347,9 @@ public static class Strings
         },
         ["ESP"] = new()
         {
+            ["applied_copy"] = "📋 Copiar",
+            ["applied_copied"] = "✓ Copiado",
+            ["applied_copy_tooltip"] = "Copiar este resumen (útil para informes de errores).",
             ["skin_label"] = "Skin",
             ["no_variants"] = "Ningún skin detectado",
             ["not_configured"] = "Sin configuración",
@@ -322,6 +377,9 @@ public static class Strings
         },
         ["ITA"] = new()
         {
+            ["applied_copy"] = "📋 Copia",
+            ["applied_copied"] = "✓ Copiato",
+            ["applied_copy_tooltip"] = "Copia questo riepilogo (utile per le segnalazioni di bug).",
             ["skin_label"] = "Skin",
             ["no_variants"] = "Nessuna skin rilevata",
             ["not_configured"] = "Nessuna configurazione",
@@ -349,6 +407,9 @@ public static class Strings
         },
         ["PTB"] = new()
         {
+            ["applied_copy"] = "📋 Copiar",
+            ["applied_copied"] = "✓ Copiado",
+            ["applied_copy_tooltip"] = "Copiar este resumo (útil para relatórios de bug).",
             ["skin_label"] = "Skin",
             ["no_variants"] = "Nenhuma skin detectada",
             ["not_configured"] = "Sem configuração",
@@ -376,6 +437,9 @@ public static class Strings
         },
         ["POR"] = new()
         {
+            ["applied_copy"] = "📋 Copiar",
+            ["applied_copied"] = "✓ Copiado",
+            ["applied_copy_tooltip"] = "Copiar este resumo (útil para relatórios de erro).",
             ["skin_label"] = "Skin",
             ["no_variants"] = "Nenhuma skin detetada",
             ["not_configured"] = "Sem configuração",
@@ -403,6 +467,9 @@ public static class Strings
         },
         ["POL"] = new()
         {
+            ["applied_copy"] = "📋 Kopiuj",
+            ["applied_copied"] = "✓ Skopiowano",
+            ["applied_copy_tooltip"] = "Skopiuj to podsumowanie (przydatne do zgłaszania błędów).",
             ["skin_label"] = "Skin",
             ["no_variants"] = "Nie wykryto skinów",
             ["not_configured"] = "Brak konfiguracji",
@@ -430,6 +497,9 @@ public static class Strings
         },
         ["RUS"] = new()
         {
+            ["applied_copy"] = "📋 Копировать",
+            ["applied_copied"] = "✓ Скопировано",
+            ["applied_copy_tooltip"] = "Скопировать эту сводку (удобно для отчётов об ошибках).",
             ["skin_label"] = "Скин",
             ["no_variants"] = "Скины не обнаружены",
             ["not_configured"] = "Без конфигурации",
@@ -457,6 +527,9 @@ public static class Strings
         },
         ["THA"] = new()
         {
+            ["applied_copy"] = "📋 คัดลอก",
+            ["applied_copied"] = "✓ คัดลอกแล้ว",
+            ["applied_copy_tooltip"] = "คัดลอกสรุปนี้ (สะดวกสำหรับการรายงานบั๊ก).",
             ["skin_label"] = "สกิน",
             ["no_variants"] = "ไม่พบสกิน",
             ["not_configured"] = "ไม่มีการตั้งค่า",
@@ -484,6 +557,9 @@ public static class Strings
         },
         ["TUR"] = new()
         {
+            ["applied_copy"] = "📋 Kopyala",
+            ["applied_copied"] = "✓ Kopyalandı",
+            ["applied_copy_tooltip"] = "Bu özeti kopyala (hata bildirimleri için kullanışlı).",
             ["skin_label"] = "Skin",
             ["no_variants"] = "Skin algılanmadı",
             ["not_configured"] = "Yapılandırma yok",

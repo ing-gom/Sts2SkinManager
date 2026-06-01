@@ -4,6 +4,23 @@ All notable changes to Sts2SkinManager are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.0] - 2026-06-01
+
+### Changed — all four tab headers stay visible
+- **Tab titles are now short** (`✅ 적용됨 / 🃏 카드 / 🧩 혼합 / 🚫 기타`, localised) and the tab bar no longer collapses overflowing tabs into a menu (`ClipTabs = false`), so all four tabs show at once across the panel width. Previously the long "Mixed mods (spine + extras)" title pushed tabs off the bar. The full descriptions still appear inside each tab and on tab hover. The whole panel still lives behind the single outer "Skin manager" toggle (collapsed by default), which is now always built so the Applied tab is reachable even for character-skin-only setups.
+
+### Added — "Applied" tab: see exactly what's loaded right now
+- **A new read-only first tab shows the actual loaded state**, not just what you've picked. Until now the dropdown / checkboxes showed your *selection*, but because skin changes only take effect after a restart, it was easy to lose track of whether what's on screen is your old skin or your new pick. The Applied tab reads the **boot snapshot** (what the game truly mounted at launch) and lists:
+  - **🧍 Characters** — each character → the skin applied right now (or *Vanilla (default)*), with a `(DLL)` tag for Harmony-driven skins and 📦 for mixed mods. If your saved/selected skin differs and hasn't been applied yet, a yellow **`→ {skin} (after restart) ⟳`** line is shown beneath it.
+  - **🆕 Custom characters** — BaseLib-style mods that add brand-new characters (e.g. Watcher, Ryoshu). SkinManager doesn't *manage* these (they stay auto-mounted), but they're now listed so you can see which extra characters are loaded, each with its character id(s). A disabled one drops to the Disabled-mods list instead.
+  - **🃏 Card skins** — the enabled packs in priority order (top wins).
+  - **🧩 Mixed mods** — the enabled mixed mods, each with its current body-look (`🧍 Selected look` / `Mod look`).
+  - **🚫 Disabled mods** — anything you've toggled off (explains a missing character / feature at a glance).
+- **A ⟳ marker on the Applied tab title and a banner line** appear whenever there are pending changes that need a restart.
+- **Mount-integrity check.** A character's applied pck-based skin is flagged with **⚠** if its pck is managed but not actually mounted (a boot mount that silently failed — e.g. a load-order problem), so "I picked it but don't see it" becomes visible instead of mysterious. DLL-driven skins apply via their assembly and are never flagged.
+- **📋 Copy button** copies the whole summary as plain text — paste it straight into a bug report instead of grepping the boot log.
+- Localised in English and Korean; other languages fall back to English (full 16-language pass is a follow-up).
+
 ## [0.15.0] - 2026-05-27
 
 ### Added — in-game toggle for "use the selected look, keep this mod's cards" (mixed mods)

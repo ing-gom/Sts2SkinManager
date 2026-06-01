@@ -331,7 +331,7 @@ public partial class MainFile : Node
             ? Sts2SettingsWriter.ReadModEnabledState(settings)
             : new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
 
-        SkinSelectorOverlay.Configure(choicesPath, byCharacter, cardMods, mixedMods, allMods, baseCharacters, bootModEnabled, vanillaBodyEligible);
+        SkinSelectorOverlay.Configure(choicesPath, byCharacter, cardMods, mixedMods, allMods, baseCharacters, bootModEnabled, vanillaBodyEligible, skippedCustom);
         SkinSelectorOverlay.SetWatcher(_watcher);
 
         // Defer ModConfig registration so the framework's own Initialize can run first.

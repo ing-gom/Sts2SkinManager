@@ -20,6 +20,10 @@ public static class SkinSelectorOverlay
     private static IReadOnlySet<string> _vanillaBodyEligible = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
     private static List<UnifiedModItem> _allMods = new();
     private static IReadOnlySet<string> _baseCharacters = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+    // Custom-character mods (BaseLib-style new characters, e.g. Watcher / Ryoshu). SkinManager
+    // doesn't manage these (they stay auto-mounted), but they're surfaced in the Applied summary
+    // so the player can see which extra characters are loaded.
+    private static List<SkinModScanner.SkippedCustomCharacterMod> _customCharacters = new();
 
     private static OptionButton? _opt;
     private static Label? _label;
@@ -39,9 +43,9 @@ public static class SkinSelectorOverlay
     private static readonly Dictionary<string, ImageTexture?> _previewCache = new(StringComparer.OrdinalIgnoreCase);
     private static readonly Dictionary<string, ImageTexture?> _cardPreviewCache = new(StringComparer.OrdinalIgnoreCase);
     // Outer collapsible wrapper: a single toggle header reveals/hides the whole skin manager UI
-    // (Save/Discard + Tabs). Default = collapsed so the character select screen stays clean.
-    // Tab-style inner: a TabContainer toggles between the card-skin and mixed-addon sections so
-    // only one set of rows is visible at a time.
+    // (Save/Discard + the tab panel). Default = collapsed so the character select screen stays clean.
+    // Inner layout: one TabContainer with four tabs (Applied / Card skins / Mixed / Other), tab
+    // headers along the top. Tab titles are kept short so all four fit without overflow arrows.
     private static VBoxContainer? _accordionVBox;
     private static Button? _outerToggleBtn;
     private static VBoxContainer? _outerBody;
@@ -49,16 +53,19 @@ public static class SkinSelectorOverlay
     private static TabContainer? _tabContainer;
     private static Button? _cardPackSaveBtn;
     private static Button? _cardPackDiscardBtn;
+    private static int _appliedTabIndex = -1;
     private static int _cardPackTabIndex = -1;
     private static int _mixedTabIndex = -1;
-    private static ScrollContainer? _cardPackScroll;
-    private static VBoxContainer? _cardPackRows;
-
-    private static ScrollContainer? _mixedScroll;
-    private static VBoxContainer? _mixedRows;
     private static int _allModsTabIndex = -1;
-    private static ScrollContainer? _allModsScroll;
+
+    private static VBoxContainer? _cardPackRows;
+    private static VBoxContainer? _mixedRows;
     private static VBoxContainer? _allModsRows;
+
+    // Read-only "Applied" tab — shows what the game actually has loaded right now (boot snapshot),
+    // with a "(after restart)" annotation when the selection differs and isn't applied yet.
+    private static VBoxContainer? _appliedRows;
+    private static Button? _appliedCopyBtn;
 
     // Pending (in-memory) state shared by character dropdown + card pack panel + mixed-addon panel
     // + All Mods decision panel. Mutations here don't touch disk; OnSave commits to choices.json
@@ -109,7 +116,8 @@ public static class SkinSelectorOverlay
         List<UnifiedModItem>? allMods = null,
         IReadOnlySet<string>? baseCharacters = null,
         IReadOnlyDictionary<string, bool>? bootModEnabled = null,
-        IReadOnlySet<string>? vanillaBodyEligible = null)
+        IReadOnlySet<string>? vanillaBodyEligible = null,
+        List<SkinModScanner.SkippedCustomCharacterMod>? customCharacters = null)
     {
         _choicesPath = choicesPath;
         _byCharacter = byCharacter;
@@ -118,6 +126,7 @@ public static class SkinSelectorOverlay
         _allMods = allMods ?? new List<UnifiedModItem>();
         _baseCharacters = baseCharacters ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         _vanillaBodyEligible = vanillaBodyEligible ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        _customCharacters = customCharacters ?? new List<SkinModScanner.SkippedCustomCharacterMod>();
 
         var initial = SkinChoicesConfig.LoadOrEmpty(_choicesPath);
         _pendingCardPacks = ClonePacks(initial.CardPacks);
@@ -650,30 +659,21 @@ public static class SkinSelectorOverlay
         PositionAccordion(vbox);
         _accordionVBox = vbox;
 
-        // Tabs are only useful when card-skin or mixed-addon mods exist, or when the All Mods
-        // master view has anything to surface. When the panel is shown purely for character-skin
-        // variant changes, skip the outer toggle + TabContainer entirely and just expose Save /
-        // Discard.
-        var hasTabContent = _cardMods.Count > 0 || _mixedMods.Count > 0 || _allMods.Count > 0;
+        // The read-only "Applied" section is always present. The Card / Mixed sections appear when
+        // those mod kinds exist; the Other Mods section only when there's something to surface.
+        var hasManageTabs = _cardMods.Count > 0 || _mixedMods.Count > 0 || _allMods.Count > 0;
 
-        // Top row — toggle (compact, only when there are tabs) + Save / Discard.
+        // Top row — outer expand/collapse toggle + Save / Discard.
         var topRow = new HBoxContainer { CustomMinimumSize = new Vector2(480, 36) };
 
-        if (hasTabContent)
+        var outerToggle = new Button
         {
-            var outerToggle = new Button
-            {
-                CustomMinimumSize = new Vector2(220, 36),
-                Alignment = HorizontalAlignment.Left,
-            };
-            _outerToggleBtn = outerToggle;
-            outerToggle.Pressed += ToggleOuterExpanded;
-            topRow.AddChild(outerToggle);
-        }
-        else
-        {
-            _outerToggleBtn = null;
-        }
+            CustomMinimumSize = new Vector2(220, 36),
+            Alignment = HorizontalAlignment.Left,
+        };
+        _outerToggleBtn = outerToggle;
+        outerToggle.Pressed += ToggleOuterExpanded;
+        topRow.AddChild(outerToggle);
 
         var saveBtn = new Button { Text = Strings.Get("save_changes"), CustomMinimumSize = new Vector2(120, 36) };
         _cardPackSaveBtn = saveBtn;
@@ -687,33 +687,59 @@ public static class SkinSelectorOverlay
 
         vbox.AddChild(topRow);
 
+        _appliedTabIndex = -1;
         _cardPackTabIndex = -1;
         _mixedTabIndex = -1;
         _allModsTabIndex = -1;
 
-        TabContainer? tabs = null;
-        if (hasTabContent)
-        {
-            // Body wraps just the tabs — collapsed by default so the screen stays clean.
-            var body = new VBoxContainer { CustomMinimumSize = new Vector2(480, 0) };
-            _outerBody = body;
-            vbox.AddChild(body);
+        // Body wraps the tab panel — collapsed by default so the character select screen stays clean.
+        var body = new VBoxContainer { CustomMinimumSize = new Vector2(480, 0) };
+        _outerBody = body;
+        vbox.AddChild(body);
 
-            // Tabs — taller now since the outer toggle gives us screen budget when expanded.
-            tabs = new TabContainer { CustomMinimumSize = new Vector2(480, 400) };
-            _tabContainer = tabs;
-            body.AddChild(tabs);
-        }
-        else
+        var tabs = new TabContainer { CustomMinimumSize = new Vector2(480, 420) };
+        // Keep all four tab headers visible at once instead of collapsing into an overflow menu.
+        tabs.ClipTabs = false;
+        _tabContainer = tabs;
+        body.AddChild(tabs);
+
+        // Applied summary — always the first tab so the panel opens on "what's loaded now".
         {
-            _outerBody = null;
-            _tabContainer = null;
+            var appliedTab = new VBoxContainer { Name = "AppliedTab" };
+
+            var appliedScroll = new ScrollContainer
+            {
+                CustomMinimumSize = new Vector2(460, 360),
+                HorizontalScrollMode = ScrollContainer.ScrollMode.Disabled,
+                VerticalScrollMode = ScrollContainer.ScrollMode.Auto,
+            };
+            appliedTab.AddChild(appliedScroll);
+
+            var appliedRows = new VBoxContainer { CustomMinimumSize = new Vector2(440, 0) };
+            _appliedRows = appliedRows;
+            appliedScroll.AddChild(appliedRows);
+
+            // Copy button sits at the bottom of the tab, right-aligned, out of the way of the
+            // summary itself. Hovering it shows a localized tooltip explaining what it copies.
+            var copyRow = new HBoxContainer { CustomMinimumSize = new Vector2(460, 36) };
+            copyRow.AddChild(new Control { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill }); // push button right
+            var copyBtn = new Button
+            {
+                Text = Strings.Get("applied_copy"),
+                CustomMinimumSize = new Vector2(140, 32),
+                TooltipText = Strings.Get("applied_copy_tooltip"),
+            };
+            _appliedCopyBtn = copyBtn;
+            copyBtn.Pressed += OnCopyAppliedSummary;
+            copyRow.AddChild(copyBtn);
+            appliedTab.AddChild(copyRow);
+
+            tabs.AddChild(appliedTab);
+            _appliedTabIndex = appliedTab.GetIndex();
+            BuildAppliedSummaryRows();
         }
 
-        // All three tabs are built unconditionally now so the panel has a stable shape regardless
-        // of what mods the user has installed. Empty tabs show a "no mods" placeholder built into
-        // the row builder so the tab itself stays visible and switchable.
-        if (tabs != null)
+        if (hasManageTabs)
         {
             var cardTab = new VBoxContainer { Name = "CardSkinTab" };
             var cardScroll = new ScrollContainer
@@ -722,7 +748,6 @@ public static class SkinSelectorOverlay
                 HorizontalScrollMode = ScrollContainer.ScrollMode.Disabled,
                 VerticalScrollMode = ScrollContainer.ScrollMode.Auto,
             };
-            _cardPackScroll = cardScroll;
             cardTab.AddChild(cardScroll);
 
             var cardRows = new VBoxContainer { CustomMinimumSize = new Vector2(460, 0) };
@@ -732,20 +757,17 @@ public static class SkinSelectorOverlay
             tabs.AddChild(cardTab);
             _cardPackTabIndex = cardTab.GetIndex();
             BuildCardPackRows();
-        }
 
-        if (tabs != null)
-        {
             var mixedTab = new VBoxContainer { Name = "MixedAddonTab" };
 
-            var helpLabel = new Label
+            var mixedHelpLabel = new Label
             {
                 Text = Strings.Get("mixed_panel_help"),
                 CustomMinimumSize = new Vector2(460, 0),
                 AutowrapMode = TextServer.AutowrapMode.WordSmart,
                 Modulate = new Color(0.75f, 0.75f, 0.75f),
             };
-            mixedTab.AddChild(helpLabel);
+            mixedTab.AddChild(mixedHelpLabel);
 
             var mixedScroll = new ScrollContainer
             {
@@ -753,7 +775,6 @@ public static class SkinSelectorOverlay
                 HorizontalScrollMode = ScrollContainer.ScrollMode.Disabled,
                 VerticalScrollMode = ScrollContainer.ScrollMode.Auto,
             };
-            _mixedScroll = mixedScroll;
             mixedTab.AddChild(mixedScroll);
 
             var mixedRows = new VBoxContainer { CustomMinimumSize = new Vector2(460, 0) };
@@ -765,7 +786,7 @@ public static class SkinSelectorOverlay
             BuildMixedAddonRows();
         }
 
-        if (tabs != null && _allMods.Count > 0)
+        if (_allMods.Count > 0)
         {
             var allTab = new VBoxContainer { Name = "AllModsTab" };
 
@@ -784,7 +805,6 @@ public static class SkinSelectorOverlay
                 HorizontalScrollMode = ScrollContainer.ScrollMode.Disabled,
                 VerticalScrollMode = ScrollContainer.ScrollMode.Auto,
             };
-            _allModsScroll = allScroll;
             allTab.AddChild(allScroll);
 
             var allRows = new VBoxContainer { CustomMinimumSize = new Vector2(460, 0) };
@@ -796,6 +816,7 @@ public static class SkinSelectorOverlay
             BuildAllModsRows();
         }
 
+        UpdateAppliedHeader();
         UpdateCardPackHeader();
         UpdateMixedHeader();
         UpdateAllModsHeader();
@@ -832,15 +853,6 @@ public static class SkinSelectorOverlay
     private static void BuildCardPackPanel(Node screen) => BuildAccordionPanel(screen);
     private static void BuildMixedAddonPanel(Node screen) { /* folded into BuildAccordionPanel */ }
 
-    private static void ToggleCardPackExpanded()
-    {
-        // Tab-based: just switch to the card tab if present.
-        if (_tabContainer != null && GodotObject.IsInstanceValid(_tabContainer) && _cardPackTabIndex >= 0)
-            _tabContainer.CurrentTab = _cardPackTabIndex;
-    }
-
-    private static void ApplyCardPackExpanded() { /* tabs handle visibility */ }
-
     private static void UpdateCardPackHeader()
     {
         var pending = _pendingCardPacks ?? new CardPacksConfig();
@@ -848,7 +860,7 @@ public static class SkinSelectorOverlay
         var enabled = pending.Enabled.Count(kv => kv.Value);
         var dirty = IsAnyDirty();
         var dirtyMark = dirty ? " *" : "";
-        var title = $"{Strings.Get("card_packs_header")} ({enabled}/{total}){dirtyMark}";
+        var title = $"🃏 {Strings.Get("tab_cards")} ({enabled}/{total}){dirtyMark}";
 
         if (_tabContainer != null && GodotObject.IsInstanceValid(_tabContainer) && _cardPackTabIndex >= 0)
             _tabContainer.SetTabTitle(_cardPackTabIndex, title);
@@ -864,6 +876,7 @@ public static class SkinSelectorOverlay
             _cardPackDiscardBtn.Text = Strings.Get("discard_changes");
         }
         UpdateOuterToggleText();
+        RefreshAppliedSummary();
     }
 
     private static void BuildCardPackRows()
@@ -1127,20 +1140,12 @@ public static class SkinSelectorOverlay
 
     // === Mixed-addon helpers (panel is built inside BuildAccordionPanel) ===
 
-    private static void ToggleMixedExpanded()
-    {
-        if (_tabContainer != null && GodotObject.IsInstanceValid(_tabContainer) && _mixedTabIndex >= 0)
-            _tabContainer.CurrentTab = _mixedTabIndex;
-    }
-
-    private static void ApplyMixedExpanded() { /* tabs handle visibility */ }
-
     private static void UpdateMixedHeader()
     {
         var pending = _pendingMixedAddons ?? new CardPacksConfig();
         var total = pending.Ordering.Count;
         var enabled = pending.Enabled.Count(kv => kv.Value);
-        var title = $"{Strings.Get("mixed_panel_header")} ({enabled}/{total})";
+        var title = $"🧩 {Strings.Get("tab_mixed")} ({enabled}/{total})";
 
         if (_tabContainer != null && GodotObject.IsInstanceValid(_tabContainer) && _mixedTabIndex >= 0)
         {
@@ -1159,13 +1164,233 @@ public static class SkinSelectorOverlay
             var eff = _pendingModEnabled.TryGetValue(item.ModId, out var p) ? p : bootEnabled;
             if (eff) enabled++;
         }
-        var title = $"{Strings.Get("all_mods_panel_header")} ({enabled}/{_allMods.Count})";
+        var title = $"🚫 {Strings.Get("tab_other")} ({enabled}/{_allMods.Count})";
         if (_tabContainer != null && GodotObject.IsInstanceValid(_tabContainer) && _allModsTabIndex >= 0)
         {
             _tabContainer.SetTabTitle(_allModsTabIndex, title);
             _tabContainer.SetTabTooltip(_allModsTabIndex, $"{enabled} enabled / {_allMods.Count} total");
         }
         UpdateOuterToggleText();
+    }
+
+    // === Applied summary (read-only "what's actually loaded right now") ===
+
+    private enum AppliedLineKind { Section, Normal, Dim, Pending, Warn }
+    private readonly record struct AppliedLine(string Text, AppliedLineKind Kind);
+
+    private static void UpdateAppliedHeader()
+    {
+        if (_tabContainer == null || !GodotObject.IsInstanceValid(_tabContainer) || _appliedTabIndex < 0) return;
+        var mark = IsAnyDirty() ? " ⟳" : "";
+        _tabContainer.SetTabTitle(_appliedTabIndex, $"✅ {Strings.Get("applied_tab_title")}{mark}");
+    }
+
+    private static void RefreshAppliedSummary()
+    {
+        if (_appliedRows == null || !GodotObject.IsInstanceValid(_appliedRows)) return;
+        BuildAppliedSummaryRows();
+    }
+
+    private static void BuildAppliedSummaryRows()
+    {
+        if (_appliedRows == null || !GodotObject.IsInstanceValid(_appliedRows)) return;
+
+        for (var i = _appliedRows.GetChildCount() - 1; i >= 0; i--)
+        {
+            var child = _appliedRows.GetChild(i);
+            _appliedRows.RemoveChild(child);
+            child.QueueFree();
+        }
+
+        var lines = BuildAppliedLines(LoadAliases(), out _);
+        foreach (var line in lines)
+        {
+            var lbl = new Label
+            {
+                Text = line.Text,
+                CustomMinimumSize = new Vector2(440, 0),
+                AutowrapMode = TextServer.AutowrapMode.WordSmart,
+                Modulate = line.Kind switch
+                {
+                    AppliedLineKind.Section => new Color(0.78f, 0.86f, 1f),
+                    AppliedLineKind.Dim => new Color(0.6f, 0.6f, 0.6f),
+                    AppliedLineKind.Pending => new Color(1f, 0.84f, 0.4f),
+                    AppliedLineKind.Warn => new Color(1f, 0.5f, 0.5f),
+                    _ => Colors.White,
+                },
+            };
+            _appliedRows.AddChild(lbl);
+        }
+        UpdateAppliedHeader();
+    }
+
+    private static void OnCopyAppliedSummary()
+    {
+        try
+        {
+            BuildAppliedLines(LoadAliases(), out var plain);
+            DisplayServer.ClipboardSet(plain);
+            MainFile.Logger.Info("applied summary copied to clipboard");
+            if (_appliedCopyBtn != null && GodotObject.IsInstanceValid(_appliedCopyBtn))
+            {
+                _appliedCopyBtn.Text = Strings.Get("applied_copied");
+                var t = _appliedCopyBtn.GetTree().CreateTimer(1.5);
+                t.Timeout += () =>
+                {
+                    if (_appliedCopyBtn != null && GodotObject.IsInstanceValid(_appliedCopyBtn))
+                        _appliedCopyBtn.Text = Strings.Get("applied_copy");
+                };
+            }
+        }
+        catch (Exception ex) { MainFile.Logger.Warn($"copy applied summary failed: {ex.Message}"); }
+    }
+
+    // Builds the lines for both the on-screen panel and the clipboard text from the boot snapshot
+    // (= what's loaded right now), annotating any character whose selection differs and is pending.
+    private static List<AppliedLine> BuildAppliedLines(Dictionary<string, string> aliases, out string plainText)
+    {
+        var lines = new List<AppliedLine>();
+        var plain = new List<string>();
+        void Add(string text, AppliedLineKind kind) { lines.Add(new AppliedLine(text, kind)); plain.Add(text); }
+
+        if (IsAnyDirty()) Add("⟳ " + Strings.Get("applied_pending_note"), AppliedLineKind.Pending);
+
+        var mixedIds = new HashSet<string>(_mixedMods.Select(x => x.ModId), StringComparer.OrdinalIgnoreCase);
+        var disk = SkinChoicesConfig.LoadOrEmpty(_choicesPath);
+        var hasAnySkinState = false;
+
+        // Characters: those with detected variants, plus any with a non-default applied skin.
+        var charSet = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (_byCharacter != null)
+            foreach (var kv in _byCharacter)
+                if (kv.Value.Count > 0) charSet.Add(kv.Key);
+        foreach (var kv in _bootSnapshotActive)
+            if (!string.Equals(kv.Value, "default", StringComparison.OrdinalIgnoreCase)) charSet.Add(kv.Key);
+
+        if (charSet.Count > 0)
+        {
+            Add("🧍 " + Strings.Get("applied_characters"), AppliedLineKind.Section);
+            foreach (var ch in charSet)
+            {
+                var boot = _bootSnapshotActive.TryGetValue(ch, out var b) ? b : "default";
+                var bootDefault = string.Equals(boot, "default", StringComparison.OrdinalIgnoreCase);
+                if (!bootDefault) hasAnySkinState = true;
+                var appliedLabel = bootDefault
+                    ? Strings.Get("applied_vanilla")
+                    : AliasService.Resolve(boot, aliases) + VariantTag(boot, mixedIds);
+
+                var diskActive = disk.Characters.TryGetValue(ch, out var dc) ? (dc.Active ?? "default") : boot;
+                var selected = _pendingActiveByCharacter.TryGetValue(ch, out var p) ? p : diskActive;
+                var pendingDiffers = !string.Equals(selected, boot, StringComparison.OrdinalIgnoreCase);
+                var missing = !bootDefault && IsAppliedVariantMissing(ch, boot);
+
+                Add($"   {Capitalize(ch)} → {appliedLabel}{(missing ? "  ⚠" : "")}",
+                    bootDefault ? AppliedLineKind.Dim : AppliedLineKind.Normal);
+                if (missing)
+                    Add($"      ⚠ {Strings.Get("applied_not_mounted")}", AppliedLineKind.Warn);
+                if (pendingDiffers)
+                {
+                    var selDefault = string.Equals(selected, "default", StringComparison.OrdinalIgnoreCase);
+                    var selLabel = selDefault
+                        ? Strings.Get("applied_vanilla")
+                        : AliasService.Resolve(selected, aliases) + VariantTag(selected, mixedIds);
+                    Add($"      → {selLabel} ({Strings.Get("applied_after_restart")}) ⟳", AppliedLineKind.Pending);
+                }
+            }
+        }
+
+        // Custom-character mods (new characters added by BaseLib-style mods). Not managed by the
+        // skin manager, but listed here so the player sees which extra characters are loaded. A
+        // disabled one drops to the "Disabled mods" section below instead.
+        // Exclude framework/library mods (BaseLib, Sts2* sisters): BaseLib defines
+        // CustomCharacterModel so it trips the custom-character signal, but it isn't a character.
+        var customEnabled = _customCharacters
+            .Where(c => !UnifiedModBuilder.IsKnownNonSkin(c.ModId))
+            .Where(c => !_bootSnapshotModEnabled.TryGetValue(c.ModId, out var en) || en)
+            .ToList();
+        if (customEnabled.Count > 0)
+        {
+            hasAnySkinState = true;
+            Add("🆕 " + Strings.Get("applied_custom_characters"), AppliedLineKind.Section);
+            foreach (var c in customEnabled)
+            {
+                var ids = c.CharacterIds != null && c.CharacterIds.Count > 0
+                    ? "  — " + string.Join(", ", c.CharacterIds)
+                    : "";
+                Add($"   {AliasService.Resolve(c.ModId, aliases)}{ids}", AppliedLineKind.Normal);
+            }
+        }
+
+        // Card skins — enabled, in priority order (top wins).
+        if (_bootSnapshotCardPacks != null && _bootSnapshotCardPacks.Ordering.Count > 0)
+        {
+            hasAnySkinState = true;
+            var enabled = _bootSnapshotCardPacks.Ordering
+                .Where(id => _bootSnapshotCardPacks.Enabled.TryGetValue(id, out var e) && e).ToList();
+            Add("🃏 " + Strings.Get("card_packs_header"), AppliedLineKind.Section);
+            if (enabled.Count == 0) Add("   " + Strings.Get("applied_none"), AppliedLineKind.Dim);
+            else { var n = 1; foreach (var id in enabled) Add($"   {n++}. {AliasService.Resolve(id, aliases)}", AppliedLineKind.Normal); }
+        }
+
+        // Mixed mods — enabled, with their body-look state.
+        if (_bootSnapshotMixedAddons != null && _bootSnapshotMixedAddons.Ordering.Count > 0)
+        {
+            hasAnySkinState = true;
+            var enabled = _bootSnapshotMixedAddons.Ordering
+                .Where(id => _bootSnapshotMixedAddons.Enabled.TryGetValue(id, out var e) && e).ToList();
+            Add("🧩 " + Strings.Get("mixed_panel_header"), AppliedLineKind.Section);
+            if (enabled.Count == 0) Add("   " + Strings.Get("applied_none"), AppliedLineKind.Dim);
+            else foreach (var id in enabled)
+            {
+                var bodyTag = _vanillaBodyEligible.Contains(id)
+                    ? $"  (🧍 {Strings.Get(_bootSnapshotVanillaBody.Contains(id) ? "vanilla_body_on" : "vanilla_body_off")})"
+                    : "";
+                Add($"   {AliasService.Resolve(id, aliases)}{bodyTag}", AppliedLineKind.Normal);
+            }
+        }
+
+        // Other mods the user turned off (informational — explains a missing character/feature).
+        var disabled = _bootSnapshotModEnabled.Where(kv => !kv.Value)
+            .Select(kv => AliasService.Resolve(kv.Key, aliases)).ToList();
+        if (disabled.Count > 0)
+        {
+            Add("🚫 " + Strings.Get("applied_other_disabled"), AppliedLineKind.Section);
+            foreach (var d in disabled) Add("   " + d, AppliedLineKind.Dim);
+        }
+
+        if (!hasAnySkinState)
+            Add(Strings.Get("applied_all_vanilla"), AppliedLineKind.Dim);
+
+        plainText = "[Sts2SkinManager] " + Strings.Get("applied_tab_title") + "\n" + string.Join("\n", plain);
+        return lines;
+    }
+
+    private static string VariantTag(string modId, HashSet<string> mixedIds)
+    {
+        if (_bootSnapshotDllAssignments.ContainsKey(modId)) return $" ({Strings.Get("applied_dll_tag")})";
+        if (mixedIds.Contains(modId)) return " 📦";
+        return "";
+    }
+
+    private static string Capitalize(string s) =>
+        string.IsNullOrEmpty(s) ? s : char.ToUpperInvariant(s[0]) + s.Substring(1);
+
+    // A pck-based skin is "applied" only if its pck is actually mounted. The active variant is
+    // mounted at boot, so a managed-but-unmounted pck means the mount failed (e.g. load-order /
+    // file issue) and the player isn't seeing the skin they picked. DLL-driven skins apply via
+    // their assembly rather than a managed mount, so they're never flagged.
+    private static bool IsAppliedVariantMissing(string character, string variantModId)
+    {
+        try
+        {
+            if (_byCharacter == null || !_byCharacter.TryGetValue(character, out var variants)) return false;
+            var mod = variants.FirstOrDefault(v => string.Equals(v.ModId, variantModId, StringComparison.OrdinalIgnoreCase));
+            if (mod == null || string.IsNullOrEmpty(mod.PckPath)) return false;
+            if (_bootSnapshotDllAssignments.ContainsKey(variantModId)) return false;
+            if (!ManagedPckRegistry.IsManaged(mod.PckPath)) return false;
+            return !ManagedPckRegistry.IsMounted(mod.PckPath);
+        }
+        catch { return false; }
     }
 
     // Resolves the visible category/character for a mod after applying any pending override.
@@ -1701,6 +1926,7 @@ public static class SkinSelectorOverlay
                 BuildCardPackRows();
                 BuildMixedAddonRows();
                 BuildAllModsRows();
+                BuildAppliedSummaryRows();
                 RefreshItems();
             }).CallDeferred();
         }
@@ -1983,7 +2209,13 @@ public static class SkinSelectorOverlay
                     RefreshItems();
                     BuildCardPackRows();
                     BuildMixedAddonRows();
+                    BuildAppliedSummaryRows();
                     UpdateMixedHeader();
+                    if (_appliedCopyBtn != null && GodotObject.IsInstanceValid(_appliedCopyBtn))
+                    {
+                        _appliedCopyBtn.Text = Strings.Get("applied_copy");
+                        _appliedCopyBtn.TooltipText = Strings.Get("applied_copy_tooltip");
+                    }
                     return;
                 }
 
@@ -2004,14 +2236,17 @@ public static class SkinSelectorOverlay
                 _outerToggleBtn = null;
                 _outerBody = null;
                 _tabContainer = null;
+                _appliedTabIndex = -1;
                 _cardPackTabIndex = -1;
                 _mixedTabIndex = -1;
+                _allModsTabIndex = -1;
                 _cardPackSaveBtn = null;
                 _cardPackDiscardBtn = null;
-                _cardPackScroll = null;
                 _cardPackRows = null;
-                _mixedScroll = null;
                 _mixedRows = null;
+                _allModsRows = null;
+                _appliedRows = null;
+                _appliedCopyBtn = null;
                 var mainLoop = Engine.GetMainLoop();
                 if (mainLoop is not SceneTree tree) return;
                 var screen = FindCharacterSelectScreen(tree.Root);

@@ -158,8 +158,10 @@ public static class UnifiedModBuilder
     }
 
     // Same filter list as HarmonyPatchInspector.IsKnownNonSkin so the All Mods panel doesn't
-    // surface utility/sister mods. Match is case-insensitive.
-    private static bool IsKnownNonSkin(string modId)
+    // surface utility/sister mods. Match is case-insensitive. Public so the Applied summary can
+    // reuse it (e.g. to keep the BaseLib framework out of the custom-characters list — BaseLib
+    // trips the custom-character signal because it *defines* CustomCharacterModel).
+    public static bool IsKnownNonSkin(string modId)
     {
         if (string.Equals(modId, "BaseLib", System.StringComparison.OrdinalIgnoreCase)) return true;
         if (modId.StartsWith("Sts2", System.StringComparison.OrdinalIgnoreCase)) return true;
