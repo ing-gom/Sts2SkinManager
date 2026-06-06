@@ -57,10 +57,12 @@ public static class SkinSelectorOverlay
     private static int _cardPackTabIndex = -1;
     private static int _mixedTabIndex = -1;
     private static int _allModsTabIndex = -1;
+    private static int _customCharTabIndex = -1;
 
     private static VBoxContainer? _cardPackRows;
     private static VBoxContainer? _mixedRows;
     private static VBoxContainer? _allModsRows;
+    private static VBoxContainer? _customCharRows;
 
     // Read-only "Applied" tab — shows what the game actually has loaded right now (boot snapshot),
     // with a "(after restart)" annotation when the selection differs and isn't applied yet.
@@ -337,7 +339,8 @@ public static class SkinSelectorOverlay
             // mods, or any All Mods entry (event-art, skipped, or pending). Without _allMods in
             // the condition, a user with only event-art mods (AncientRetexture pattern) would
             // see no manager UI at all.
-            if (_cardMods.Count > 0 || _mixedMods.Count > 0 || hasCharacterVariants || _allMods.Count > 0)
+            if (_cardMods.Count > 0 || _mixedMods.Count > 0 || hasCharacterVariants || _allMods.Count > 0
+                || ToggleableCustomCharacters().Count > 0)
                 BuildAccordionPanel(screen);
 
             EnsureLocaleSubscribed();
@@ -691,6 +694,7 @@ public static class SkinSelectorOverlay
         _cardPackTabIndex = -1;
         _mixedTabIndex = -1;
         _allModsTabIndex = -1;
+        _customCharTabIndex = -1;
 
         // Body wraps the tab panel — collapsed by default so the character select screen stays clean.
         var body = new VBoxContainer { CustomMinimumSize = new Vector2(480, 0) };
@@ -816,10 +820,45 @@ public static class SkinSelectorOverlay
             BuildAllModsRows();
         }
 
+        // Custom Characters tab — BaseLib-style mods that add brand-new characters. SkinManager
+        // doesn't manage these as skins (they auto-mount), but the user can enable/disable each one
+        // here. The checkbox drives the same settings.save mod_list IsEnabled path as the Other tab
+        // (via _pendingModEnabled), so Save/Discard already cover it with no extra wiring.
+        if (ToggleableCustomCharacters().Count > 0)
+        {
+            var ccTab = new VBoxContainer { Name = "CustomCharTab" };
+
+            var ccHelp = new Label
+            {
+                Text = Strings.Get("custom_char_panel_help"),
+                CustomMinimumSize = new Vector2(460, 0),
+                AutowrapMode = TextServer.AutowrapMode.WordSmart,
+                Modulate = new Color(0.75f, 0.75f, 0.75f),
+            };
+            ccTab.AddChild(ccHelp);
+
+            var ccScroll = new ScrollContainer
+            {
+                CustomMinimumSize = new Vector2(460, 340),
+                HorizontalScrollMode = ScrollContainer.ScrollMode.Disabled,
+                VerticalScrollMode = ScrollContainer.ScrollMode.Auto,
+            };
+            ccTab.AddChild(ccScroll);
+
+            var ccRows = new VBoxContainer { CustomMinimumSize = new Vector2(460, 0) };
+            _customCharRows = ccRows;
+            ccScroll.AddChild(ccRows);
+
+            tabs.AddChild(ccTab);
+            _customCharTabIndex = ccTab.GetIndex();
+            BuildCustomCharacterRows();
+        }
+
         UpdateAppliedHeader();
         UpdateCardPackHeader();
         UpdateMixedHeader();
         UpdateAllModsHeader();
+        UpdateCustomCharHeader();
         ApplyOuterExpanded();
         UpdateOuterToggleText();
 
@@ -1503,6 +1542,110 @@ public static class SkinSelectorOverlay
         return string.Join("\n", lines);
     }
 
+    // Custom-character mods (BaseLib-style new characters) the user may enable/disable. Excludes
+    // framework/sister mods (BaseLib defines CustomCharacterModel so it trips the custom-character
+    // signal, but it isn't itself a character) via the same filter the Applied summary uses.
+    private static List<SkinModScanner.SkippedCustomCharacterMod> ToggleableCustomCharacters() =>
+        _customCharacters.Where(c => !UnifiedModBuilder.IsKnownNonSkin(c.ModId)).ToList();
+
+    private static void BuildCustomCharacterRows()
+    {
+        if (_customCharRows == null || !GodotObject.IsInstanceValid(_customCharRows)) return;
+
+        for (var i = _customCharRows.GetChildCount() - 1; i >= 0; i--)
+        {
+            var child = _customCharRows.GetChild(i);
+            _customCharRows.RemoveChild(child);
+            child.QueueFree();
+        }
+
+        foreach (var cc in ToggleableCustomCharacters())
+            _customCharRows.AddChild(BuildCustomCharacterRow(cc));
+        UpdateCustomCharHeader();
+    }
+
+    private static Control BuildCustomCharacterRow(SkinModScanner.SkippedCustomCharacterMod cc)
+    {
+        var hbox = new HBoxContainer
+        {
+            CustomMinimumSize = new Vector2(460, 36),
+            MouseFilter = Control.MouseFilterEnum.Pass,
+        };
+
+        // Same enable/disable mechanism as the Other tab: the checkbox drives STS2's settings.save
+        // mod_list IsEnabled through _pendingModEnabled, applied in one shot on Save. Off = STS2
+        // won't load the custom character on next launch.
+        var bootEnabled = _bootSnapshotModEnabled.TryGetValue(cc.ModId, out var be) ? be : true;
+        var pendingEnabled = _pendingModEnabled.TryGetValue(cc.ModId, out var pe) ? pe : bootEnabled;
+        var check = new CheckBox
+        {
+            ButtonPressed = pendingEnabled,
+            CustomMinimumSize = new Vector2(32, 32),
+            TooltipText = Strings.Get("custom_char_toggle_tooltip"),
+        };
+        hbox.AddChild(check);
+
+        var status = new Label
+        {
+            CustomMinimumSize = new Vector2(24, 32),
+            VerticalAlignment = VerticalAlignment.Center,
+            HorizontalAlignment = HorizontalAlignment.Center,
+        };
+        hbox.AddChild(status);
+
+        var ids = cc.CharacterIds != null && cc.CharacterIds.Count > 0 ? string.Join(", ", cc.CharacterIds) : "";
+        var displayName = string.IsNullOrEmpty(ids) ? cc.ModId : $"{cc.ModId}  — {ids}";
+        var nameLabel = new Label
+        {
+            Text = displayName,
+            CustomMinimumSize = new Vector2(360, 32),
+            VerticalAlignment = VerticalAlignment.Center,
+            MouseFilter = Control.MouseFilterEnum.Stop,
+            TooltipText = string.Join("\n", new[] { cc.ModId, ids, cc.DomainsLabel ?? "" }.Where(s => !string.IsNullOrEmpty(s))),
+        };
+        hbox.AddChild(nameLabel);
+
+        check.Toggled += isOn =>
+        {
+            if (isOn == bootEnabled) _pendingModEnabled.Remove(cc.ModId);
+            else _pendingModEnabled[cc.ModId] = isOn;
+            ApplyRowVisual();
+            UpdateCustomCharHeader();
+            UpdateCardPackHeader();
+        };
+
+        void ApplyRowVisual()
+        {
+            var enabled = _pendingModEnabled.TryGetValue(cc.ModId, out var p) ? p : bootEnabled;
+            nameLabel.Modulate = enabled ? Colors.White : new Color(0.55f, 0.55f, 0.55f);
+            status.Text = enabled ? "✓" : "—";
+            status.Modulate = enabled ? new Color(0.6f, 0.95f, 0.6f) : new Color(0.55f, 0.55f, 0.55f);
+        }
+        ApplyRowVisual();
+
+        return hbox;
+    }
+
+    private static void UpdateCustomCharHeader()
+    {
+        var list = ToggleableCustomCharacters();
+        if (list.Count == 0) return;
+        var enabled = 0;
+        foreach (var c in list)
+        {
+            var bootEnabled = _bootSnapshotModEnabled.TryGetValue(c.ModId, out var be) ? be : true;
+            var eff = _pendingModEnabled.TryGetValue(c.ModId, out var p) ? p : bootEnabled;
+            if (eff) enabled++;
+        }
+        var title = $"🆕 {Strings.Get("tab_custom_characters")} ({enabled}/{list.Count})";
+        if (_tabContainer != null && GodotObject.IsInstanceValid(_tabContainer) && _customCharTabIndex >= 0)
+        {
+            _tabContainer.SetTabTitle(_customCharTabIndex, title);
+            _tabContainer.SetTabTooltip(_customCharTabIndex, $"{enabled} enabled / {list.Count} total");
+        }
+        UpdateOuterToggleText();
+    }
+
     private static void BuildMixedAddonRows()
     {
         if (_mixedRows == null || !GodotObject.IsInstanceValid(_mixedRows)) return;
@@ -1926,6 +2069,7 @@ public static class SkinSelectorOverlay
                 BuildCardPackRows();
                 BuildMixedAddonRows();
                 BuildAllModsRows();
+                BuildCustomCharacterRows();
                 BuildAppliedSummaryRows();
                 RefreshItems();
             }).CallDeferred();

@@ -62,7 +62,7 @@ public partial class MainFile : Node
         // EventModel/EncounterModel/CardModel/PowerModel/RelicModel/PotionModel subclasses. This
         // must run BEFORE the scanner reads _dll_skin_assignments — otherwise the demoted mod still
         // gets dll-blocked for the current session.
-        var rescue = EntityBasedRescue.RunPreScan(modsDir, preliminaryChoicesPath);
+        var rescue = EntityBasedRescue.RunPreScan(modsDir, preliminaryChoicesPath, baseCharacters);
 
         var preliminaryChoices = SkinChoicesConfig.LoadOrEmpty(preliminaryChoicesPath);
         var preliminaryDllAssignments = preliminaryChoices.DllSkinAssignments;

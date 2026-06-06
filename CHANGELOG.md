@@ -4,6 +4,15 @@ All notable changes to Sts2SkinManager are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.17.0] - 2026-06-06
+
+### Added — "Custom Characters" tab: enable/disable extra characters
+- **A new tab lists every custom character (BaseLib-style new-character mod) with an on/off checkbox.** Until now these mods were only *shown* read-only in the Applied tab — SkinManager intentionally doesn't manage them as skins (they auto-mount), so there was no way to turn one off from the panel. The new tab drives the same `settings.save` mod-list `is_enabled` toggle as the Other tab, so changes participate in Save / Discard and take effect after a restart. Framework/library mods (BaseLib, `Sts2*` sisters) are excluded; the tab only appears when at least one custom character is present.
+
+### Fixed — texture/cosmetic utilities no longer mistaken for character skins
+- **A mod that wholesale-retextures cards/relics/powers/potions (e.g. `CustomCardTextureLoaderSG`) is no longer detectable as a character skin.** Such mods Harmony-patch a whitelisted character-select type (`NCharacterSelectButton`) just to swap the select-screen button texture, which tripped the DLL-skin suspect heuristic — and a stale `_dll_skin_assignments` entry could then DLL-block the utility whenever a real skin for that character was active, silently breaking it.
+- **New Signal B (`CosmeticUtilityDetector`)**: a DLL that references ≥ 2 base content-model types (`RelicModel` / `PowerModel` / `PotionModel`) **and has no per-character identity** is treated as a global cosmetic utility — auto-skipped, never managed as a skin. The "no per-character identity" guard (`HasCharacterSignal`: concrete-patch / byte-frequency / manifest keyword) protects a *themed* skin that also retextures content — it still names its character, so it stays managed. Stale assignments matching the signature are auto-healed (demoted to `_dll_skin_skipped`) on boot.
+
 ## [0.16.0] - 2026-06-01
 
 ### Changed — all four tab headers stay visible

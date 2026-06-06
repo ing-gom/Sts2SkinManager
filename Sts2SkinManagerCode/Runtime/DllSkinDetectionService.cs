@@ -101,9 +101,11 @@ public static class DllSkinDetectionService
                 continue;
             }
 
-            // Signal A: if the suspect's DLL defines new game-entity subclasses, it's a content
-            // mod (Act4FinalAscent pattern). Auto-skip without prompting — the user can override
-            // from the DLL Mods decision panel if they really want to manage it as a skin.
+            // Signal A/B: if the suspect's DLL defines new game-entity subclasses (content mod,
+            // Act4FinalAscent pattern) OR references >= 2 base content-model types (global
+            // cosmetic/texture utility, CustomCardTextureLoaderSG pattern), auto-skip without
+            // prompting — the user can override from the DLL Mods decision panel if they really
+            // want to manage it as a skin.
             if (EntityBasedRescue.TryGateSuspect(suspect.ModId, modsDir, choices))
             {
                 entityRescueDirty = true;
@@ -156,6 +158,20 @@ public static class DllSkinDetectionService
             }
             else
             {
+                // No character identity (concrete / byte-frequency / manifest all null). If the
+                // DLL is a global cosmetic/texture utility (references >= 2 base content-model
+                // types — relic/power/potion), auto-skip instead of prompting: it's not a per-
+                // character skin. A themed skin that also retextures content would have resolved a
+                // character above (suggested != null) and never reach here.
+                var dllPath = HarmonyPatchInspector.FindModDllPath(modsDir, suspect.ModId);
+                if (dllPath != null && CosmeticUtilityDetector.IsGlobalCosmeticMod(dllPath))
+                {
+                    choices.DllSkinSkipped.Add(suspect.ModId);
+                    entityRescueDirty = true;
+                    MainFile.Logger.Info($"dll-skin: auto-skip '{suspect.ModId}' — patches [{string.Join(", ", suspect.PatchedTargets)}] but references >= 2 base content-model types (relic/power/potion) with no character signal. Global cosmetic/texture utility, not a character skin. Adding to _dll_skin_skipped.");
+                    continue;
+                }
+
                 ambiguous.Add(suspect);
                 var nameDesc = ManifestCharacterHinter.TryReadNameDescription(modFolder);
                 var manifestExcerpt = nameDesc.HasValue

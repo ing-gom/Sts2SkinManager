@@ -3,7 +3,7 @@
     "name": "STS2 Skin Manager",
     "author": "inggom",
     "description": "Manage character skin, card skin, and mixed (spine + extras) mods from one in-game panel on the Character Select screen. Hover to preview, rename inline, toggle, and layer with priority. The whole UI is wrapped in a collapsible Skin Manager toggle so it stays out of the way until you need it.",
-    "version": "0.16.0",
+    "version": "0.17.0",
     "has_pck": false,
     "has_dll": true,
     "dependencies": [],

@@ -16,12 +16,21 @@ namespace Sts2SkinManager.Discovery;
 // as a defect skin variant and DLL-blocks them whenever the user picks another skin — the
 // Architect boss silently disappears from the game.
 //
-// EntityDefinitionDetector reads each mod's DLL via System.Reflection.Metadata (no assembly
-// load) and checks whether it defines new MonsterModel/EventModel/EncounterModel/CardModel/
-// PowerModel/RelicModel/PotionModel subclasses. Skin mods never do this; content mods almost
-// always do. Any positive signal moves the assignment from _dll_skin_assignments to
-// _dll_skin_skipped, saves the config, and logs the rescue. On next boot, the cleaned config
-// causes the scanner to leave the mod alone.
+// Two complementary false-positive signals, either of which demotes a bogus assignment:
+//   Signal A (EntityDefinitionDetector): the DLL DEFINES new MonsterModel/EventModel/
+//     EncounterModel/CardModel/PowerModel/RelicModel/PotionModel subclasses — a content mod
+//     (Act4FinalAscent). Read via System.Reflection.Metadata, no assembly load.
+//   Signal B (CosmeticUtilityDetector): the DLL REFERENCES >= 2 base content-model types
+//     (relic/power/potion) AND the mod has NO per-character identity — a wholesale texture/
+//     cosmetic utility (CustomCardTextureLoaderSG) that patches a whitelisted character-select
+//     type for retexturing, not skinning. The "no per-character identity" guard (HasCharacterSignal)
+//     is what protects a *themed* skin that also retextures relics/powers/potions: such a mod still
+//     names its target character (via concrete patch / byte-frequency / manifest keyword), so it
+//     keeps a character signal and is NOT demoted — only a content-model-referencing mod with zero
+//     character signal is treated as a utility.
+// Skin mods never trip either signal. Any positive signal moves the assignment from
+// _dll_skin_assignments to _dll_skin_skipped, saves the config, and logs the rescue. On next
+// boot, the cleaned config causes the scanner to leave the mod alone.
 public static class EntityBasedRescue
 {
     public record RescueResult(IReadOnlyList<string> RescuedModIds);
@@ -30,7 +39,7 @@ public static class EntityBasedRescue
     // current session's dll-block already happened for these mods before this method ran, so
     // a restart is needed to actually re-mount the content. (Or the user just plays through;
     // they get the content back on next launch.)
-    public static RescueResult RunPreScan(string modsDir, string choicesPath)
+    public static RescueResult RunPreScan(string modsDir, string choicesPath, IReadOnlySet<string> baseCharacters)
     {
         var choices = SkinChoicesConfig.LoadOrEmpty(choicesPath);
         if (choices.DllSkinAssignments.Count == 0)
@@ -53,9 +62,16 @@ public static class EntityBasedRescue
             }
 
             var report = EntityDefinitionDetector.InspectFile(modId, dllPath);
-            if (report == null)
+            // Signal B only fires when the mod has NO character identity — a themed skin that also
+            // retextures relics/powers/potions still names its character, so HasCharacterSignal keeps
+            // it managed. Only a content-model-referencing mod with zero character signal is a utility.
+            var modFolder = Path.GetDirectoryName(dllPath)!;
+            var isCosmetic = report == null
+                && !HasCharacterSignal(modFolder, baseCharacters)
+                && CosmeticUtilityDetector.IsGlobalCosmeticMod(dllPath);
+            if (report == null && !isCosmetic)
             {
-                MainFile.Logger.Info($"dll-skin rescue: '{modId}' (assigned '{assignedChar}') — no content-entity subclasses found (signal A negative), keeping assignment. DLL: {dllPath}");
+                MainFile.Logger.Info($"dll-skin rescue: '{modId}' (assigned '{assignedChar}') — no content-entity subclasses (signal A) and no content-model texture patches without character signal (signal B), keeping assignment. DLL: {dllPath}");
                 continue;
             }
 
@@ -63,13 +79,24 @@ public static class EntityBasedRescue
             choices.DllSkinSkipped.Add(modId);
             rescued.Add(modId);
 
-            MainFile.Logger.Warn(
-                $"dll-skin rescue: '{modId}' was assigned as '{assignedChar}' skin but defines " +
-                $"{report.DefinedEntities.Count} content entit{(report.DefinedEntities.Count == 1 ? "y" : "ies")} " +
-                $"(first base: {report.FirstEntityBaseName}). " +
-                $"Treating as content mod, moving to _dll_skin_skipped. " +
-                $"Restart STS2 to restore the mod's DLL. " +
-                $"Entities: [{string.Join(", ", report.DefinedEntities.Take(5))}{(report.DefinedEntities.Count > 5 ? ", …" : "")}]");
+            if (report != null)
+            {
+                MainFile.Logger.Warn(
+                    $"dll-skin rescue: '{modId}' was assigned as '{assignedChar}' skin but defines " +
+                    $"{report.DefinedEntities.Count} content entit{(report.DefinedEntities.Count == 1 ? "y" : "ies")} " +
+                    $"(first base: {report.FirstEntityBaseName}). " +
+                    $"Treating as content mod, moving to _dll_skin_skipped. " +
+                    $"Restart STS2 to restore the mod's DLL. " +
+                    $"Entities: [{string.Join(", ", report.DefinedEntities.Take(5))}{(report.DefinedEntities.Count > 5 ? ", …" : "")}]");
+            }
+            else
+            {
+                MainFile.Logger.Warn(
+                    $"dll-skin rescue: '{modId}' was assigned as '{assignedChar}' skin but references >= 2 " +
+                    $"base content-model types (relic/power/potion — signal B). A character skin never " +
+                    $"patches relics/powers/potions; this is a global cosmetic/texture utility. " +
+                    $"Treating as utility mod, moving to _dll_skin_skipped. Restart STS2 to restore the mod's DLL.");
+            }
         }
 
         if (rescued.Count > 0)
@@ -79,7 +106,7 @@ public static class EntityBasedRescue
         }
         else
         {
-            MainFile.Logger.Info($"dll-skin rescue: no assignments demoted (all {choices.DllSkinAssignments.Count} pass signal A check).");
+            MainFile.Logger.Info($"dll-skin rescue: no assignments demoted (all {choices.DllSkinAssignments.Count} pass signal A/B check).");
         }
 
         return new RescueResult(rescued);
@@ -101,5 +128,19 @@ public static class EntityBasedRescue
             $"entit{(report.DefinedEntities.Count == 1 ? "y" : "ies")} (first base: {report.FirstEntityBaseName}). " +
             $"Likely a content mod, not a skin. Adding to _dll_skin_skipped.");
         return true;
+    }
+
+    // A genuine character skin always references its target character somewhere — via a concrete
+    // CharacterModel.<X> patch, the byte-frequency suggester, or a localized manifest keyword. If
+    // none of these resolve a character, the mod has no per-character identity, so Signal B can
+    // safely treat a content-model reference as "global utility, not a skin". This guard is what
+    // protects a themed skin that also retextures relics/powers/potions from being demoted.
+    // (Signal B in the deferred DllSkinDetectionService path uses the already-computed `suggested`
+    // — which includes the concrete-patch hit — and so needs no separate call here.)
+    private static bool HasCharacterSignal(string modFolder, IReadOnlySet<string> baseCharacters)
+    {
+        if (CharacterIdSuggester.Suggest(modFolder, baseCharacters) != null) return true;
+        if (ManifestCharacterHinter.Suggest(modFolder, baseCharacters) != null) return true;
+        return false;
     }
 }
