@@ -136,7 +136,26 @@ public static class DllSkinDetectionService
 
             string? via = null;
             string? suggested = null;
-            if (concreteHit != null) { suggested = concreteHit; via = "concrete-type patch"; }
+
+            // ClymandSaru framework: the target base character is declared explicitly in
+            // `{modId}_config.cfg` (template_replacements). This is authoritative and overrides the
+            // heuristics below — every ClymandSaru DLL embeds the literal "ironclad" (the framework's
+            // default template) regardless of the real target, so byte-frequency would mis-assign a
+            // Defect/Silent skin to Ironclad. A ClymandSaru mod with no player-character target
+            // (creature-only reskin, e.g. reven_q→byrdpip) is left to the game's normal auto-mount.
+            if (ClymandSaruSkinReader.IsClymandSaruSkin(modFolder, suspect.ModId))
+            {
+                var saruTarget = ClymandSaruSkinReader.ResolveTargetCharacter(modFolder, suspect.ModId);
+                if (saruTarget == null || (baseCharacters.Count > 0 && !baseCharacters.Contains(saruTarget)))
+                {
+                    MainFile.Logger.Info($"dll-skin: skipping ClymandSaru mod '{suspect.ModId}' — {suspect.ModId}_config.cfg declares no base-character target (creature-only reskin or unknown char). Leaving auto-mount intact.");
+                    continue;
+                }
+                suggested = saruTarget;
+                via = "ClymandSaru config";
+            }
+
+            if (suggested == null && concreteHit != null) { suggested = concreteHit; via = "concrete-type patch"; }
             if (suggested == null)
             {
                 suggested = CharacterIdSuggester.Suggest(modFolder, baseCharacters);

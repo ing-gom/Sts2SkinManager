@@ -154,6 +154,22 @@ public static class SkinModScanner
                 var isMixed = isCardMod;
                 result.Add(new DetectedSkinMod(pckId, modDir, pck, SkinModKind.Character, baseHits.ToList(), previewPath, isMixed, domainsLabel));
             }
+            else if (ClymandSaruSkinReader.ResolveTargetCharacter(modDir, pckId) is { } saruChar
+                     && (baseCharacters.Count == 0 || baseCharacters.Contains(saruChar)))
+            {
+                // ClymandSaru template-replacement skin: the target base character is declared in
+                // `{pckId}_config.cfg` (template_replacements), not in the pck's asset paths — so
+                // the spine regex above found 0 characters. Classify as a DLL-driven Character skin
+                // (same routing as the dllSkinAssignments branch) so MainFile's DLL-block coordination
+                // reverts it when the user picks "default" or another skin for this character.
+                // Checked before the custom-character/card/event fallbacks so these never get
+                // misclassified as brand-new characters. A ClymandSaru mod that targets no player
+                // character (creature-only reskin, e.g. reven_q→byrdpip) returns null here and falls
+                // through to the branches below.
+                MainFile.Logger.Info($"  [clymandsaru] {pckId} → '{saruChar}' (via {pckId}_config.cfg template_replacements)");
+                result.Add(new DetectedSkinMod(pckId, modDir, pck, SkinModKind.Character,
+                    new List<string> { saruChar }, previewPath, IsMixed: false, DomainsLabel: domainsLabel));
+            }
             else if (scan.IsCustomCharacterMod || CustomCharacterFrameworkDetector.IsCustomCharacterMod(modDir, pckId))
             {
                 // BaseLib-style custom-character mod that packs spine under a non-standard path

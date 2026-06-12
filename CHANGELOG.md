@@ -4,6 +4,13 @@ All notable changes to Sts2SkinManager are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.18.0] - 2026-06-12
+
+### Added — detect ClymandSaru template-replacement skins
+- **ClymandSaru-framework skins are now recognised and managed as character skins.** These mods (e.g. `ClymandSaru_jasmine_q` → Ironclad, `ClymandSaru_zhubao_q` → Defect) reskin an existing character but do **not** ship the standard `animations/characters/{char}/` spine paths — instead they carry flat `res://img/...` assets plus a sibling `{modId}_config.cfg` whose `template_replacements` map names the base character their DLL overwrites at runtime. Until now the pck-path scanner found 0 characters, so these mods were invisible: no dropdown variant and no DLL-block coordination with other skins for the same character.
+- **New `ClymandSaruSkinReader`** reads the `template_replacements` block as the authoritative target. This also fixes a mis-assignment: every ClymandSaru DLL embeds the literal `ironclad` (the framework's default template) regardless of its real target, so the byte-frequency suggester would have assigned a Defect skin to Ironclad and DLL-blocked it under the wrong character.
+- A ClymandSaru mod that targets no player character (a creature-only reskin, e.g. `reven_q` → `byrdpip`) declares no `true` entry, so it is left to the game's normal auto-mount instead of being force-assigned to a base character.
+
 ## [0.17.0] - 2026-06-06
 
 ### Added — "Custom Characters" tab: enable/disable extra characters
