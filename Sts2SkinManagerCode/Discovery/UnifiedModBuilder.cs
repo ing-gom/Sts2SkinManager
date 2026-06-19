@@ -46,7 +46,7 @@ public record UnifiedModItem(
 public static class UnifiedModBuilder
 {
     public static List<UnifiedModItem> Build(
-        string modsDir,
+        IReadOnlyList<string> modsDirs,
         List<DetectedSkinMod> scannerDetected,
         SkinChoicesConfig choices,
         IReadOnlyCollection<string> customCharacterModIds,
@@ -69,7 +69,7 @@ public static class UnifiedModBuilder
             var manifestPath = TryFindManifest(d.ModFolder);
             var (name, desc) = manifestPath != null ? ReadManifest(manifestPath) : ("", "");
 
-            var dllPath = HarmonyPatchInspector.FindModDllPath(modsDir, d.ModId);
+            var dllPath = HarmonyPatchInspector.FindModDllPath(modsDirs, d.ModId);
             var definesEntities = dllPath != null && EntityDefinitionDetector.InspectFile(d.ModId, dllPath) != null;
 
             result.Add(new UnifiedModItem(
@@ -99,11 +99,11 @@ public static class UnifiedModBuilder
             if (customChars.Contains(modId)) continue;
             seen.Add(modId);
 
-            var modFolder = LocateModFolder(modsDir, modId);
+            var modFolder = LocateModFolder(modsDirs, modId);
             var manifestPath = modFolder != null ? TryFindManifest(modFolder) : null;
             var (name, desc) = manifestPath != null ? ReadManifest(manifestPath) : ("", "");
 
-            var dllPath = HarmonyPatchInspector.FindModDllPath(modsDir, modId);
+            var dllPath = HarmonyPatchInspector.FindModDllPath(modsDirs, modId);
             var definesEntities = dllPath != null && EntityDefinitionDetector.InspectFile(modId, dllPath) != null;
 
             result.Add(new UnifiedModItem(
@@ -120,7 +120,7 @@ public static class UnifiedModBuilder
         //     and not assigned. Surface so the user can route them. (HarmonyPatchInspector
         //     suspect filtering happens elsewhere; this pass uses the cheaper pck+dll presence
         //     check as the user-facing trigger.)
-        foreach (var modFolder in EnumerateModFolders(modsDir))
+        foreach (var modFolder in EnumerateModFolders(modsDirs))
         {
             var dllPath = FindFirstFileByExtension(modFolder, ".dll");
             if (dllPath == null) continue;
@@ -202,6 +202,17 @@ public static class UnifiedModBuilder
         return ("", "");
     }
 
+    // Searches roots in order; a local mods/ folder is returned before a Workshop duplicate.
+    private static string? LocateModFolder(IReadOnlyList<string> modsDirs, string modId)
+    {
+        foreach (var modsDir in modsDirs)
+        {
+            var hit = LocateModFolder(modsDir, modId);
+            if (hit != null) return hit;
+        }
+        return null;
+    }
+
     private static string? LocateModFolder(string modsDir, string modId)
     {
         try
@@ -216,6 +227,13 @@ public static class UnifiedModBuilder
         }
         catch { }
         return null;
+    }
+
+    private static IEnumerable<string> EnumerateModFolders(IReadOnlyList<string> modsDirs)
+    {
+        foreach (var modsDir in modsDirs)
+            foreach (var folder in EnumerateModFolders(modsDir))
+                yield return folder;
     }
 
     private static IEnumerable<string> EnumerateModFolders(string modsDir)

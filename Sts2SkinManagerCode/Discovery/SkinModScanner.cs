@@ -46,7 +46,7 @@ public static class SkinModScanner
     public record SkippedCustomCharacterMod(string ModId, IReadOnlyList<string> CharacterIds, string? DomainsLabel = null);
 
     public static List<DetectedSkinMod> Scan(
-        string modsDir,
+        IReadOnlyList<string> modsDirs,
         IReadOnlySet<string> baseCharacters,
         out List<SkippedCustomCharacterMod> skippedCustomCharacterMods,
         IReadOnlyDictionary<string, string>? dllSkinAssignments = null,
@@ -54,7 +54,6 @@ public static class SkinModScanner
     {
         var result = new List<DetectedSkinMod>();
         skippedCustomCharacterMods = new List<SkippedCustomCharacterMod>();
-        if (!Directory.Exists(modsDir)) return result;
 
         var skipSet = dllSkinSkipped == null
             ? new HashSet<string>(StringComparer.OrdinalIgnoreCase)
@@ -62,9 +61,11 @@ public static class SkinModScanner
 
         // Recursive walk so users can group pcks under category folders (e.g. mods/캐릭터/, mods/아트워크/).
         // Each pck's immediate parent directory is treated as its modDir for preview lookup.
+        // mods/ root is enumerated before any Workshop root (see MainFile modRoots ordering), so the
+        // first occurrence of a duplicate pck id — kept by seenModIds below — is the local copy.
         var seenModIds = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
-        foreach (var pck in EnumeratePckFilesRecursive(modsDir))
+        foreach (var pck in EnumeratePckFilesRecursive(modsDirs))
         {
             var modDir = Path.GetDirectoryName(pck)!;
             var previewPath = FindPreview(modDir);
@@ -214,6 +215,15 @@ public static class SkinModScanner
             }
         }
         return result;
+    }
+
+    // Walks every scan root (local mods/ then any Steam Workshop root) in order. Yielding in root
+    // order is what lets the caller's seenModIds dedup prefer the local copy of a duplicate.
+    private static IEnumerable<string> EnumeratePckFilesRecursive(IReadOnlyList<string> modsDirs)
+    {
+        foreach (var modsDir in modsDirs)
+            foreach (var pck in EnumeratePckFilesRecursive(modsDir))
+                yield return pck;
     }
 
     // Walks modsDir recursively, yielding *.pck files at any depth >= 1. Pcks sitting directly in

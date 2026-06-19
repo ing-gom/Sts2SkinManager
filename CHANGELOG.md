@@ -4,6 +4,13 @@ All notable changes to Sts2SkinManager are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.19.0] - 2026-06-19
+
+### Added — manage Steam Workshop–subscribed skins
+- **SkinManager now scans Steam Workshop subscriptions, not just the local `mods/` folder.** Workshop subscriptions install outside `mods/` — under `steamapps/workshop/content/2868840/{itemId}/` — which STS2 itself loads via the Steam API (`SteamUGC.GetItemInstallInfo`). Until now SkinManager only walked `mods/`, so a skin you subscribed to on the Workshop never appeared in the panel and couldn't be previewed, toggled, or layered.
+- **The Workshop root is derived relative to the game install** (`steamapps/common/Slay the Spire 2` → `../../workshop/content/2868840`), so no Steam binding is needed — Steam guarantees workshop content lives in the same library as the game. The root is only added when the folder exists.
+- **Local `mods/` wins over a Workshop duplicate.** When the same mod id is present in both locations, the local copy is kept — matching STS2's own loader, which disables the Workshop version of a duplicate id. Reading from Steam's managed folder is safe: SkinManager never modifies scanned mod files (mounting is in-memory via the `LoadResourcePack` intercept).
+
 ## [0.18.0] - 2026-06-12
 
 ### Added — detect ClymandSaru template-replacement skins

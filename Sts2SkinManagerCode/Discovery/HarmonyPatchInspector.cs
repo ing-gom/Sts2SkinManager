@@ -143,10 +143,9 @@ public static class HarmonyPatchInspector
     // Builds the assembly-name → mod-id map by walking the mods/ tree and reading each loaded
     // DLL's AssemblyName.Name. Only inspects DLLs that are in AppDomain.CurrentDomain — never
     // touches disk for already-loaded assemblies (avoids reload pitfalls).
-    public static Dictionary<string, string> BuildAssemblyToModIdMap(string modsDir)
+    public static Dictionary<string, string> BuildAssemblyToModIdMap(IReadOnlyList<string> modsDirs)
     {
         var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        if (!Directory.Exists(modsDir)) return result;
 
         // For each DLL on disk under mods/, treat its file-name-without-extension as the candidate
         // mod folder id (matching SkinModScanner's pck convention). Then check if that assembly
@@ -164,7 +163,7 @@ public static class HarmonyPatchInspector
             catch { }
         }
 
-        foreach (var dllPath in EnumerateDllsRecursive(modsDir))
+        foreach (var dllPath in EnumerateDllsRecursive(modsDirs))
         {
             var folderId = Path.GetFileNameWithoutExtension(dllPath);
             if (string.IsNullOrEmpty(folderId)) continue;
@@ -179,15 +178,23 @@ public static class HarmonyPatchInspector
 
     // Exposed so EntityDefinitionDetector callers can locate a mod's DLL on disk without
     // re-walking the whole mods/ tree themselves. ModId convention matches BuildAssemblyToModIdMap.
-    public static string? FindModDllPath(string modsDir, string modId)
+    // Roots are searched in order, so a local mods/ copy is returned before a Workshop duplicate.
+    public static string? FindModDllPath(IReadOnlyList<string> modsDirs, string modId)
     {
-        foreach (var dllPath in EnumerateDllsRecursive(modsDir))
+        foreach (var dllPath in EnumerateDllsRecursive(modsDirs))
         {
             var folderId = Path.GetFileNameWithoutExtension(dllPath);
             if (string.Equals(folderId, modId, StringComparison.OrdinalIgnoreCase))
                 return dllPath;
         }
         return null;
+    }
+
+    private static IEnumerable<string> EnumerateDllsRecursive(IReadOnlyList<string> roots)
+    {
+        foreach (var root in roots)
+            foreach (var dll in EnumerateDllsRecursive(root))
+                yield return dll;
     }
 
     private static IEnumerable<string> EnumerateDllsRecursive(string root)

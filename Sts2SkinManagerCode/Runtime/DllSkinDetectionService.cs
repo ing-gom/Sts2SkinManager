@@ -21,7 +21,7 @@ public static class DllSkinDetectionService
 
     public static void ScheduleAfter(
         SceneTree tree,
-        string modsDir,
+        IReadOnlyList<string> modsDirs,
         string choicesPath,
         string managerDataDir,
         IReadOnlySet<string> baseCharacters,
@@ -42,7 +42,7 @@ public static class DllSkinDetectionService
             var timer = tree.CreateTimer(DetectionDelaySeconds);
             timer.Timeout += () =>
             {
-                try { Run(modsDir, choicesPath, managerDataDir, baseCharacters, alreadyDetected, customCharacterMods); }
+                try { Run(modsDirs, choicesPath, managerDataDir, baseCharacters, alreadyDetected, customCharacterMods); }
                 catch (Exception ex) { MainFile.Logger.Warn($"dll skin detection failed: {ex.Message}"); }
             };
         }
@@ -53,14 +53,14 @@ public static class DllSkinDetectionService
     }
 
     private static void Run(
-        string modsDir,
+        IReadOnlyList<string> modsDirs,
         string choicesPath,
         string managerDataDir,
         IReadOnlySet<string> baseCharacters,
         HashSet<string> alreadyDetected,
         HashSet<string> customCharacterMods)
     {
-        var assemblyToModId = HarmonyPatchInspector.BuildAssemblyToModIdMap(modsDir);
+        var assemblyToModId = HarmonyPatchInspector.BuildAssemblyToModIdMap(modsDirs);
         var suspects = HarmonyPatchInspector.Inspect(assemblyToModId);
 
         // Reload from disk to capture any UI-driven edits made between MainFile.Initialize and
@@ -106,7 +106,7 @@ public static class DllSkinDetectionService
             // cosmetic/texture utility, CustomCardTextureLoaderSG pattern), auto-skip without
             // prompting — the user can override from the DLL Mods decision panel if they really
             // want to manage it as a skin.
-            if (EntityBasedRescue.TryGateSuspect(suspect.ModId, modsDir, choices))
+            if (EntityBasedRescue.TryGateSuspect(suspect.ModId, modsDirs, choices))
             {
                 entityRescueDirty = true;
                 continue;
@@ -114,7 +114,7 @@ public static class DllSkinDetectionService
 
             // Find the mod folder. assemblyToModId maps name→folderId but we still need the path
             // to read pck/dll bytes. Walk the mods tree once to find the matching folder.
-            var modFolder = LocateModFolder(modsDir, suspect.ModId);
+            var modFolder = LocateModFolder(modsDirs, suspect.ModId);
             if (modFolder == null)
             {
                 MainFile.Logger.Warn($"dll-skin suspect '{suspect.ModId}' patched [{string.Join(", ", suspect.PatchedTargets)}] but mod folder not found — skipping suggestion.");
@@ -182,7 +182,7 @@ public static class DllSkinDetectionService
                 // types — relic/power/potion), auto-skip instead of prompting: it's not a per-
                 // character skin. A themed skin that also retextures content would have resolved a
                 // character above (suggested != null) and never reach here.
-                var dllPath = HarmonyPatchInspector.FindModDllPath(modsDir, suspect.ModId);
+                var dllPath = HarmonyPatchInspector.FindModDllPath(modsDirs, suspect.ModId);
                 if (dllPath != null && CosmeticUtilityDetector.IsGlobalCosmeticMod(dllPath))
                 {
                     choices.DllSkinSkipped.Add(suspect.ModId);
@@ -206,7 +206,7 @@ public static class DllSkinDetectionService
         // can't" cases the user needs to know about. Logged every boot so the trail is durable.
         var harmonySuspectIds = suspects.Select(s => s.ModId).ToList();
         var unclassified = UnclassifiedModInventory.Build(
-            modsDir, baseCharacters, alreadyDetected, harmonySuspectIds,
+            modsDirs, baseCharacters, alreadyDetected, harmonySuspectIds,
             choices.DllSkinAssignments.Keys, choices.DllSkinSkipped, customCharacterMods);
         if (unclassified.Count > 0)
         {
@@ -287,6 +287,17 @@ public static class DllSkinDetectionService
 
     private static string Truncate(string s, int max) =>
         s.Length <= max ? s : s.Substring(0, max) + "…";
+
+    // Searches roots in order; a local mods/ folder is returned before a Workshop duplicate.
+    private static string? LocateModFolder(IReadOnlyList<string> modsDirs, string modId)
+    {
+        foreach (var modsDir in modsDirs)
+        {
+            var hit = LocateModFolder(modsDir, modId);
+            if (hit != null) return hit;
+        }
+        return null;
+    }
 
     private static string? LocateModFolder(string modsDir, string modId)
     {

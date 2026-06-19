@@ -29,7 +29,7 @@ public record UnclassifiedMod(
 public static class UnclassifiedModInventory
 {
     public static List<UnclassifiedMod> Build(
-        string modsDir,
+        IReadOnlyList<string> modsDirs,
         IReadOnlySet<string> baseCharacters,
         IReadOnlyCollection<string> alreadyDetectedModIds,
         IReadOnlyCollection<string> harmonySuspectModIds,
@@ -48,9 +48,8 @@ public static class UnclassifiedModInventory
         var customCharacters = new HashSet<string>(customCharacterModIds, StringComparer.OrdinalIgnoreCase);
 
         var result = new List<UnclassifiedMod>();
-        if (!Directory.Exists(modsDir)) return result;
 
-        foreach (var modFolder in EnumerateModFolders(modsDir))
+        foreach (var modFolder in EnumerateModFolders(modsDirs))
         {
             var dllPath = FindFirstFileByExtension(modFolder, ".dll");
             var pckPath = FindFirstFileByExtension(modFolder, ".pck");
@@ -97,6 +96,13 @@ public static class UnclassifiedModInventory
             result.Add(new UnclassifiedMod(modId, modFolder, HasDll: true, HasPck: true, pckChars, pckCards, suggested));
         }
         return result;
+    }
+
+    private static IEnumerable<string> EnumerateModFolders(IReadOnlyList<string> modsDirs)
+    {
+        foreach (var modsDir in modsDirs)
+            foreach (var folder in EnumerateModFolders(modsDir))
+                yield return folder;
     }
 
     private static IEnumerable<string> EnumerateModFolders(string modsDir)

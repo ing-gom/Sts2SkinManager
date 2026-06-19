@@ -48,6 +48,32 @@ public partial class MainFile : Node
         var managerDataDir = Path.Combine(userDataDir, ModId);
         Directory.CreateDirectory(managerDataDir);
 
+        // Scan roots, in priority order. modsDir (manual installs next to the executable) comes
+        // first so that when a mod exists in BOTH the local mods/ folder and a Steam Workshop
+        // subscription, the local copy wins — matching STS2's own ModManager, which disables the
+        // Workshop version of a duplicate id.
+        //
+        // Steam Workshop subscriptions install OUTSIDE mods/: under
+        // <library>/steamapps/workshop/content/<appId>/<itemId>/. STS2 resolves that path via the
+        // Steam API (SteamUGC.GetItemInstallInfo) and loads both sources, so we must too — otherwise
+        // workshop-subscribed skins never appear in the manager. Steam guarantees workshop content
+        // lives in the SAME library as the game, so deriving it relative to gameDir
+        // (steamapps/common/<game> → ../../workshop/content/<appId>) is robust with no Steam binding.
+        // Safe to read from Steam's managed folder: SkinManager never mutates scanned mod folders —
+        // mounting is in-memory via the LoadResourcePack intercept (see ManagedPckRegistry).
+        var modRoots = new List<string> { modsDir };
+        try
+        {
+            const string steamWorkshopAppId = "2868840"; // Slay the Spire 2
+            var workshopDir = Path.GetFullPath(Path.Combine(gameDir, "..", "..", "workshop", "content", steamWorkshopAppId));
+            if (Directory.Exists(workshopDir) && !string.Equals(workshopDir, Path.GetFullPath(modsDir), StringComparison.OrdinalIgnoreCase))
+            {
+                modRoots.Add(workshopDir);
+                Logger.Info($"steam workshop mods root: {workshopDir}");
+            }
+        }
+        catch (Exception ex) { Logger.Warn($"could not resolve steam workshop mods root: {ex.Message}"); }
+
         var baseCharacters = SkinModScanner.ScanBaseCharacters(gameDir);
         Logger.Info($"base character roster ({baseCharacters.Count}): [{string.Join(", ", baseCharacters.OrderBy(x => x))}]");
 
@@ -62,13 +88,13 @@ public partial class MainFile : Node
         // EventModel/EncounterModel/CardModel/PowerModel/RelicModel/PotionModel subclasses. This
         // must run BEFORE the scanner reads _dll_skin_assignments — otherwise the demoted mod still
         // gets dll-blocked for the current session.
-        var rescue = EntityBasedRescue.RunPreScan(modsDir, preliminaryChoicesPath, baseCharacters);
+        var rescue = EntityBasedRescue.RunPreScan(modRoots, preliminaryChoicesPath, baseCharacters);
 
         var preliminaryChoices = SkinChoicesConfig.LoadOrEmpty(preliminaryChoicesPath);
         var preliminaryDllAssignments = preliminaryChoices.DllSkinAssignments;
         var preliminaryDllSkipped = preliminaryChoices.DllSkinSkipped;
 
-        var detected = SkinModScanner.Scan(modsDir, baseCharacters, out var skippedCustom, preliminaryDllAssignments, preliminaryDllSkipped);
+        var detected = SkinModScanner.Scan(modRoots, baseCharacters, out var skippedCustom, preliminaryDllAssignments, preliminaryDllSkipped);
         var characterMods = detected.Where(d => d.Kind == SkinModKind.Character).ToList();
         var cardMods = detected.Where(d => d.Kind == SkinModKind.Cards).ToList();
         var eventArtMods = detected.Where(d => d.Kind == SkinModKind.EventArt).ToList();
@@ -304,7 +330,7 @@ public partial class MainFile : Node
         // variants, card skins, mixed mods, user-skipped DLL mods, and pending DLL+pck mods.
         // Excludes SkinManager itself, BaseLib, Sts2* sister mods, and custom-character mods.
         var customCharacterIdsForPanel = skippedCustom.Select(s => s.ModId).ToList();
-        var allMods = UnifiedModBuilder.Build(modsDir, detected, choices, customCharacterIdsForPanel, baseCharacters);
+        var allMods = UnifiedModBuilder.Build(modRoots, detected, choices, customCharacterIdsForPanel, baseCharacters);
         if (allMods.Count > 0)
         {
             Logger.Info($"all mods: {allMods.Count} mod(s) tracked:");
@@ -379,7 +405,7 @@ public partial class MainFile : Node
             // whenever the user picks "default" or another skin. Pass them through so the
             // detection service short-circuits before suggesting.
             var customCharacterIds = skippedCustom.Select(s => s.ModId).ToList();
-            DllSkinDetectionService.ScheduleAfter(tree, modsDir, choicesPath, managerDataDir, baseCharacters, alreadyDetectedIds, customCharacterIds);
+            DllSkinDetectionService.ScheduleAfter(tree, modRoots, choicesPath, managerDataDir, baseCharacters, alreadyDetectedIds, customCharacterIds);
         }
     }
 

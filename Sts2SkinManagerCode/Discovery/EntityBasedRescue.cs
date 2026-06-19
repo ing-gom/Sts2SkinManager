@@ -39,7 +39,7 @@ public static class EntityBasedRescue
     // current session's dll-block already happened for these mods before this method ran, so
     // a restart is needed to actually re-mount the content. (Or the user just plays through;
     // they get the content back on next launch.)
-    public static RescueResult RunPreScan(string modsDir, string choicesPath, IReadOnlySet<string> baseCharacters)
+    public static RescueResult RunPreScan(IReadOnlyList<string> modsDirs, string choicesPath, IReadOnlySet<string> baseCharacters)
     {
         var choices = SkinChoicesConfig.LoadOrEmpty(choicesPath);
         if (choices.DllSkinAssignments.Count == 0)
@@ -54,7 +54,7 @@ public static class EntityBasedRescue
         foreach (var modId in choices.DllSkinAssignments.Keys.ToList())
         {
             var assignedChar = choices.DllSkinAssignments[modId];
-            var dllPath = HarmonyPatchInspector.FindModDllPath(modsDir, modId);
+            var dllPath = HarmonyPatchInspector.FindModDllPath(modsDirs, modId);
             if (dllPath == null)
             {
                 MainFile.Logger.Info($"dll-skin rescue: '{modId}' (assigned '{assignedChar}') — DLL not found in mods tree, leaving as-is.");
@@ -115,9 +115,9 @@ public static class EntityBasedRescue
     // Same shape as RunPreScan but for the deferred path inside DllSkinDetectionService: given a
     // candidate modId discovered via Harmony patch inspection, decide whether to auto-skip
     // entirely (no suggestion modal). Returns true if the mod was demoted.
-    public static bool TryGateSuspect(string modId, string modsDir, SkinChoicesConfig choices)
+    public static bool TryGateSuspect(string modId, IReadOnlyList<string> modsDirs, SkinChoicesConfig choices)
     {
-        var dllPath = HarmonyPatchInspector.FindModDllPath(modsDir, modId);
+        var dllPath = HarmonyPatchInspector.FindModDllPath(modsDirs, modId);
         if (dllPath == null) return false;
         var report = EntityDefinitionDetector.InspectFile(modId, dllPath);
         if (report == null) return false;
