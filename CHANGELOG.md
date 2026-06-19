@@ -4,6 +4,13 @@ All notable changes to Sts2SkinManager are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.20.0] - 2026-06-19
+
+### Added — Applied tab now shows each mod's *actual* load state
+- **A new "Actual load state" section reads the game's real `ModManager` state**, not just the boot snapshot of `settings.save`. This is the authoritative answer to "which skin mod is actually active right now", and it resolves a confusing gap: a character-skin DLL that SkinManager blocks at runtime (because it isn't the picked variant) is suppressed via the `TryLoadMod` intercept, which never writes `is_enabled` — so the game's own mod menu kept showing it as **enabled** even though it wasn't loaded.
+- **Per-mod badges make the source of each state explicit**: ✅ loaded · ⛔ blocked by Skin Manager (runtime DLL-block, not the active pick) · 🚫 disabled in the mod menu (`is_enabled = false`) · ❌ failed to load · ⟳ added at runtime (restart to apply) · ❔ not loaded. The ⛔/🚫 split tells you *why* a mod isn't active. The section is included in the 📋 Copy summary for bug reports.
+- Display-only: no change to toggling, mounting, or blocking behaviour — purely restores visibility.
+
 ## [0.19.0] - 2026-06-19
 
 ### Added — manage Steam Workshop–subscribed skins

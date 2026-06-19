@@ -99,6 +99,14 @@ public static class Strings
             ["applied_not_mounted"] = "not mounted — check load order / logs",
             ["applied_other_disabled"] = "Disabled mods",
             ["applied_all_vanilla"] = "All characters use the default look.",
+            ["applied_actual_header"] = "Actual load state",
+            ["applied_actual_help"] = "What STS2 actually loaded this session (can differ from the mod menu until you restart).",
+            ["applied_state_loaded"] = "loaded",
+            ["applied_state_blocked"] = "blocked by Skin Manager",
+            ["applied_state_disabled"] = "disabled in mod menu",
+            ["applied_state_failed"] = "failed to load",
+            ["applied_state_pending"] = "added at runtime — restart to apply",
+            ["applied_state_absent"] = "not loaded",
         },
         ["KOR"] = new()
         {
@@ -170,6 +178,14 @@ public static class Strings
             ["applied_not_mounted"] = "마운트 안 됨 — 로드 순서 / 로그 확인",
             ["applied_other_disabled"] = "비활성화된 모드",
             ["applied_all_vanilla"] = "모든 캐릭터가 기본 외형을 사용 중이에요.",
+            ["applied_actual_header"] = "실제 로드 상태",
+            ["applied_actual_help"] = "이번 세션에 STS2가 실제로 로드한 상태예요 (재시작 전까지 모드 메뉴와 다를 수 있어요).",
+            ["applied_state_loaded"] = "로드됨",
+            ["applied_state_blocked"] = "스킨 매니저가 차단함",
+            ["applied_state_disabled"] = "모드 메뉴에서 꺼짐",
+            ["applied_state_failed"] = "로드 실패",
+            ["applied_state_pending"] = "런타임 추가됨 — 재시작 후 적용",
+            ["applied_state_absent"] = "로드 안 됨",
         },
         ["JPN"] = new()
         {

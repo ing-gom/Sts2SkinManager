@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using Godot;
 using MegaCrit.Sts2.Core.Localization;
+using MegaCrit.Sts2.Core.Modding;
 using Sts2SkinManager.Config;
 using Sts2SkinManager.Discovery;
 using Sts2SkinManager.Localization;
@@ -1400,8 +1401,78 @@ public static class SkinSelectorOverlay
         if (!hasAnySkinState)
             Add(Strings.Get("applied_all_vanilla"), AppliedLineKind.Dim);
 
+        // Ground truth — what STS2 ACTUALLY loaded this session, read live from ModManager.Mods.
+        // This is the authoritative answer to "which mod is actually active". It can disagree with
+        // the game's mod menu (is_enabled): character-skin DLLs are blocked at runtime by the
+        // TryLoadMod intercept, which never writes is_enabled, so the menu keeps showing them as
+        // enabled even when they're not loaded. This section surfaces that gap directly.
+        var actualStates = ReadActualModStates();
+        var knownIds = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (_byCharacter != null)
+            foreach (var kv in _byCharacter)
+                foreach (var v in kv.Value)
+                    if (!string.IsNullOrEmpty(v.ModId)) knownIds.Add(v.ModId);
+        foreach (var m in _cardMods) if (!string.IsNullOrEmpty(m.ModId)) knownIds.Add(m.ModId);
+        foreach (var m in _mixedMods) if (!string.IsNullOrEmpty(m.ModId)) knownIds.Add(m.ModId);
+        foreach (var c in _customCharacters) if (!string.IsNullOrEmpty(c.ModId)) knownIds.Add(c.ModId);
+        foreach (var item in _allMods) if (!string.IsNullOrEmpty(item.ModId)) knownIds.Add(item.ModId);
+
+        if (knownIds.Count > 0)
+        {
+            Add("📡 " + Strings.Get("applied_actual_header"), AppliedLineKind.Section);
+            Add("   " + Strings.Get("applied_actual_help"), AppliedLineKind.Dim);
+            foreach (var id in knownIds)
+            {
+                var (emoji, stateText, kind) = DescribeActualState(id, actualStates);
+                Add($"   {emoji} {AliasService.Resolve(id, aliases)} — {stateText}", kind);
+            }
+        }
+
         plainText = "[Sts2SkinManager] " + Strings.Get("applied_tab_title") + "\n" + string.Join("\n", plain);
         return lines;
+    }
+
+    // Reads each loaded mod's actual framework state straight from the game's ModManager — the
+    // single source of truth for what's active this session (mods can't load/unload at runtime,
+    // so this is stable per boot). Keyed by manifest id.
+    private static Dictionary<string, ModLoadState> ReadActualModStates()
+    {
+        var map = new Dictionary<string, ModLoadState>(StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            foreach (var m in ModManager.Mods)
+            {
+                var id = m?.manifest?.id;
+                if (!string.IsNullOrEmpty(id)) map[id!] = m!.state;
+            }
+        }
+        catch (Exception ex) { MainFile.Logger.Warn($"read actual mod states failed: {ex.Message}"); }
+        return map;
+    }
+
+    // Maps a mod's real ModLoadState to a (badge, label, color) tuple. Disabled splits two ways:
+    // a mod SkinManager manages was blocked by our TryLoadMod intercept (not the active pick); any
+    // other disabled mod was turned off in the game's own mod menu.
+    private static (string emoji, string text, AppliedLineKind kind) DescribeActualState(
+        string modId, IReadOnlyDictionary<string, ModLoadState> states)
+    {
+        if (!states.TryGetValue(modId, out var st))
+            return ("❔", Strings.Get("applied_state_absent"), AppliedLineKind.Dim);
+        switch (st)
+        {
+            case ModLoadState.Loaded:
+                return ("✅", Strings.Get("applied_state_loaded"), AppliedLineKind.Normal);
+            case ModLoadState.AddedAtRuntime:
+                return ("⟳", Strings.Get("applied_state_pending"), AppliedLineKind.Pending);
+            case ModLoadState.Failed:
+                return ("❌", Strings.Get("applied_state_failed"), AppliedLineKind.Warn);
+            case ModLoadState.Disabled:
+                return ManagedDllRegistry.IsManaged(modId)
+                    ? ("⛔", Strings.Get("applied_state_blocked"), AppliedLineKind.Dim)
+                    : ("🚫", Strings.Get("applied_state_disabled"), AppliedLineKind.Dim);
+            default:
+                return ("❔", st.ToString(), AppliedLineKind.Dim);
+        }
     }
 
     private static string VariantTag(string modId, HashSet<string> mixedIds)
