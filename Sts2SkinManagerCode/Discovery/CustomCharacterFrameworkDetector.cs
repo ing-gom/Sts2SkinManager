@@ -38,6 +38,37 @@ public static class CustomCharacterFrameworkDetector
         return false;
     }
 
+    // Framework-agnostic "adds a brand-new character" signal: the mod ships a character-select
+    // asset for an id that is NOT in the base roster. Skins reuse the base character's id; only a
+    // new character mints a new char-select id. This catches RitsuLib-packed characters (HornetMod
+    // → `hornet`) that carry none of the BaseLib signals above — no BaseLib dependency, no
+    // CustomCharacterModel base class — and so would otherwise be byte-frequency mis-assigned to a
+    // base character and DLL-blocked. `charSelectIds` comes from AssetDomainCatalog.ScanPaths.
+    // Returns false when the base roster is empty (base pck unreadable) — we can't tell new from
+    // base then, so we stay conservative and leave the mod to the existing signals.
+    public static bool IntroducesNonBaseCharacter(IReadOnlySet<string> charSelectIds, IReadOnlySet<string> baseCharacters)
+    {
+        if (baseCharacters.Count == 0) return false;
+        foreach (var id in charSelectIds)
+            if (!baseCharacters.Contains(id)) return true;
+        return false;
+    }
+
+    // Same signal as above but reads the mod's pck directly — for callers (EntityBasedRescue) that
+    // only have the mod folder, not a pre-computed PathScan. Locates `{modId}.pck` in modDir.
+    public static bool IntroducesNonBaseCharacterByPck(string modDir, string modId, IReadOnlySet<string> baseCharacters)
+    {
+        if (baseCharacters.Count == 0) return false;
+        var pck = Path.Combine(modDir, modId + ".pck");
+        if (!File.Exists(pck)) return false;
+        try
+        {
+            var scan = AssetDomainCatalog.ScanPaths(PckPathReader.ReadAsciiRuns(pck));
+            return IntroducesNonBaseCharacter(scan.CharSelectIds, baseCharacters);
+        }
+        catch { return false; }
+    }
+
     private static bool DeclaresBaseLibDependency(string modDir)
     {
         if (!Directory.Exists(modDir)) return false;
@@ -58,7 +89,11 @@ public static class CustomCharacterFrameworkDetector
 
                 foreach (var dep in deps)
                 {
-                    var name = dep?.ToString();
+                    // Manifests use two dependency shapes: a bare string ("BaseLib") or an object
+                    // ({ "id": "BaseLib", "min_version": "..." }). HornetMod uses the object form for
+                    // its RitsuLib dependency; reading dep.ToString() on an object yields the whole
+                    // JSON, never matching — so resolve the id field explicitly when present.
+                    var name = dep is JsonObject depObj ? depObj["id"]?.ToString() : dep?.ToString();
                     if (string.Equals(name, BaseLibDependency, StringComparison.OrdinalIgnoreCase))
                         return true;
                 }

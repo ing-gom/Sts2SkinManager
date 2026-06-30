@@ -444,68 +444,95 @@ public partial class MainFile : Node
             .Select(d => d.ModId)
             .ToList();
 
-        var needsReorder = LoadOrderEnforcer.NeedsReorderInModList(settings, ModId, loadOrderTargets);
-        var escalate = needsReorder && choices.LoadOrderReorderedLastBoot;
+        // v0.23.0 — block skins that load BEFORE us by DISABLING them, never by reordering the
+        // mod_list.
+        //
+        // Why not reorder: moving SkinManager ahead in settings.save's mod_list shifts the load
+        // order of every mod between us and our earliest target. That changes the order in which
+        // content/framework mods (RitsuLib & its custom-character mods) register their cards / relics
+        // / epochs, which reshuffles the numeric ids in ModelIdSerializationCache. A progress.save
+        // written under the old order then mis-maps under the new one and the player's data appears
+        // "not loaded". The reorder also never reliably stuck (the game re-sorts the list), so it
+        // re-armed the restart modal every boot.
+        //
+        // Disabling is both order-preserving (other mods keep their positions; the disabled one is
+        // just skipped) and content-safe: a managed CharacterSkin is pure visuals — it defines no
+        // ModelDb entities — so removing it leaves the content-id table identical. A skin that loads
+        // AFTER us is still caught by the TryLoadMod intercept (no action needed); only the rare skin
+        // AHEAD of us (which we couldn't intercept this boot) is disabled so it can't apply next
+        // boot. The auto-heal above re-enables it the moment the user picks it as the active skin.
+        // Resolution is deterministic — one restart — with no mod_list reordering.
+        var targetsAhead = LoadOrderEnforcer.TargetsAheadOfSelf(settings, ModId, loadOrderTargets);
 
-        var fileReordered = false;
-        var settingsChanged = false;
+        // Hard guard: never auto-disable a content/framework mod. Targets are already detected skins,
+        // but if one defines game-entity subclasses (a content mod) or is BaseLib / a sister mod, we
+        // leave it LOADED-but-unblocked rather than risk corrupting its save data or breaking a
+        // dependency chain. (Disabling RitsuLib via this path is exactly what we must never do.)
+        var folderById = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var d in characterMods) folderById[d.ModId] = d.ModFolder;
+
         var disabledForConflict = new List<string>();
-
-        if (escalate)
+        var skippedContentTargets = new List<string>();
+        foreach (var id in targetsAhead)
         {
-            // The mods actually blocking us — disable them so they don't load (and can't re-sort).
-            disabledForConflict = LoadOrderEnforcer.TargetsAheadOfSelf(settings, ModId, loadOrderTargets);
-            foreach (var id in disabledForConflict)
+            if (IsContentOrFrameworkMod(id, folderById.TryGetValue(id, out var f) ? f : null))
             {
-                enableChanges[id] = false;
-                choices.LoadOrderResolvedByDisable.Add(id);
+                skippedContentTargets.Add(id);
+                continue;
             }
-        }
-        else if (needsReorder)
-        {
-            fileReordered = LoadOrderEnforcer.EnsureBeforeTargetsInModList(settings, ModId, loadOrderTargets);
+            enableChanges[id] = false;
+            choices.LoadOrderResolvedByDisable.Add(id);
+            disabledForConflict.Add(id);
         }
 
+        var settingsChanged = false;
         if (enableChanges.Count > 0)
         {
             settingsChanged = Sts2SettingsWriter.ApplyModEnabledState(settings, enableChanges);
             Sts2SettingsWriter.MutateInMemoryModList(enableChanges);
         }
 
-        // In-memory tidy only — no effect this boot (TryLoadMod already ran in the old order), it
-        // just prevents a misleading "reordered" warning once we're settled ahead of our targets.
-        var memoryReordered = LoadOrderEnforcer.EnsureBeforeTargetsInMods(ModId, loadOrderTargets);
-
-        // Record whether we reordered, so next boot can tell a fix didn't stick (the war signal).
-        choices.LoadOrderReorderedLastBoot = fileReordered;
+        // Reorder is removed; clear any legacy flag so an older config doesn't linger as a "war"
+        // signal (the field is otherwise unused now).
+        choices.LoadOrderReorderedLastBoot = false;
         choices.Save(choicesPath);
+        if (settingsChanged) Sts2SettingsWriter.Save(settings);
 
-        if (fileReordered || settingsChanged) Sts2SettingsWriter.Save(settings);
-
-        if (fileReordered || settingsChanged || memoryReordered)
+        if (skippedContentTargets.Count > 0)
         {
-            Logger.Warn($"self-bootstrap: file_reorder={fileReordered} disabled=[{string.Join(",", disabledForConflict)}] " +
-                        $"reenabled=[{string.Join(",", enableChanges.Where(kv => kv.Value).Select(kv => kv.Key))}] mem={memoryReordered}. " +
-                        "*** RESTART STS2 ONCE *** for full activation.");
+            Logger.Warn($"load-order: {skippedContentTargets.Count} early-loading target(s) define content / are framework mods — left loaded (not disabled) to protect their data: [{string.Join(",", skippedContentTargets)}].");
         }
 
-        // Restart prompts (all auto-restart with a "restart later" option):
-        //  - escalation that disabled a conflicting skin → "conflict resolved" message
-        //  - a plain reorder → first-setup message
-        //  - re-enable only (user re-picked a previously-disabled skin) → generic skin-change message
-        if (escalate && disabledForConflict.Count > 0)
+        // Restart prompts (auto-restart with a "restart later" option):
+        if (disabledForConflict.Count > 0)
         {
-            Logger.Warn($"load-order conflict: SkinManager kept landing behind its managed skin mods despite reordering. Auto-resolved by disabling [{string.Join(",", disabledForConflict)}] in the mod list.");
+            Logger.Warn($"load-order: blocked {disabledForConflict.Count} skin(s) that load before SkinManager by disabling them (no mod_list reorder — keeps content-mod save ids stable): [{string.Join(",", disabledForConflict)}]. *** RESTART STS2 ONCE *** to apply.");
             RestartCountdownModal.ShowOrReset(managerDataDir, 10, "load_order_conflict_title", "load_order_conflict_body");
-        }
-        else if (fileReordered)
-        {
-            RestartCountdownModal.ShowOrReset(managerDataDir, 10, "load_order_modal_title", "load_order_modal_body");
         }
         else if (settingsChanged)
         {
+            // Only re-enables happened (user re-picked a previously-disabled skin).
+            Logger.Warn("load-order: re-enabled previously-disabled skin(s) for the active pick. *** RESTART STS2 ONCE *** to apply.");
             RestartCountdownModal.ShowOrReset(managerDataDir, 10, "modal_title", "modal_body");
         }
+    }
+
+    // True if a mod must never be auto-disabled by the load-order skin block: a framework / sister
+    // mod (BaseLib, Sts2*) or any mod whose DLL defines game-entity subclasses (a content mod, not a
+    // pure skin). Disabling such a mod could corrupt its save data or strand a dependent — so when a
+    // target ahead of us trips this, we leave it loaded-but-unblocked instead.
+    private static bool IsContentOrFrameworkMod(string modId, string? modFolder)
+    {
+        if (Discovery.UnifiedModBuilder.IsKnownNonSkin(modId)) return true; // BaseLib, Sts2*
+        if (string.IsNullOrEmpty(modFolder)) return false;
+        try
+        {
+            var dll = System.IO.Path.Combine(modFolder, modId + ".dll");
+            if (System.IO.File.Exists(dll) && Discovery.EntityDefinitionDetector.InspectFile(modId, dll) != null)
+                return true;
+        }
+        catch { }
+        return false;
     }
 
     private static ChoicesFileWatcher? _watcher;

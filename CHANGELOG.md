@@ -4,6 +4,31 @@ All notable changes to Sts2SkinManager are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.23.0] - 2026-07-01
+
+### Changed — block early-loading skins by disabling them, never by reordering the mod list
+- **SkinManager no longer reorders `settings.save`'s `mod_list`.** The load-order self-bootstrap previously moved SkinManager ahead of any managed skin that loaded before it. Moving our entry shifts the load order of every mod in between — including content/framework mods (RitsuLib and the custom characters built on it). That changes the order those mods register their cards/relics/epochs, which reshuffles the numeric ids in the game's `ModelIdSerializationCache`. A `progress.save` written under the old order then **mis-maps under the new order and the player's progress appears "not loaded."** The reorder also never reliably stuck (the game re-sorts the list on load), so it re-armed the restart modal on every boot.
+- **New behavior: a skin that loads *before* SkinManager (so our `TryLoadMod` intercept can't catch it) is now blocked by disabling it (`is_enabled = false`) instead of reordering.** Disabling is **order-preserving** (every other mod keeps its position; the disabled mod is simply skipped) and **content-safe** (a managed character skin is pure visuals — it defines no `ModelDb` entities — so removing it leaves the content-id table identical). Skins that load *after* SkinManager are unaffected (still caught by the intercept). Resolution is deterministic: one restart, no reorder, no modal loop.
+- **Hard guard — never auto-disable a content/framework mod.** Before disabling any early-loading target, SkinManager checks it isn't BaseLib, a `Sts2*` sister mod, or a mod whose DLL defines game-entity subclasses (a content mod). Such a target is left *loaded-but-unblocked* rather than risk corrupting its save data or breaking a dependency (e.g. RitsuLib must never be disabled by this path).
+- The deprecated reorder helpers (`EnsureBeforeTargetsInModList` / in-memory reorder) and the `_load_order_reordered_last_boot` "war" flag are no longer used; the flag is force-cleared so legacy configs don't carry a stale signal.
+
+### Why
+- Reported in the wild: subscribing a RitsuLib-based custom character (WineFox) made SkinManager fire the load-order reorder, after which **save data stopped loading**. Root cause was the mod_list reorder destabilizing the shared progress save's content-id mapping — not the character mod itself. Custom characters never needed blocking (they add a new character, they don't override an existing one); only same-character *skins* need blocking, and that is preserved here via the disable path.
+
+## [0.22.0] - 2026-07-01
+
+### Fixed — library-based custom characters (RitsuLib, etc.) no longer mis-blocked as skins
+- **A custom-character mod built on a general framework (e.g. RitsuLib) is now recognised as a new character, not auto-assigned as a base-character skin and DLL-blocked.** The trigger case: the *Hornet* mod (Hollow Knight: Silksong character, RitsuLib-based) never appeared in Character Select. SkinManager's byte-frequency suggester saw base-character byte references inside `HornetMod.dll` and wrote `_dll_skin_assignments: { "HornetMod": "silent" }`; because `silent`'s active pick was `default`, the `TryLoadMod` intercept blocked Hornet's DLL every boot, so the character was never registered.
+- **Root cause:** the existing custom-character guard only knew BaseLib's conventions — a `BaseLib` manifest dependency, a `CustomCharacterModel` base class, or a root `characters.json`. RitsuLib characters carry none of these (they depend on `STS2-RitsuLib`, pack assets under mod-namespaced paths, and register via the RitsuLib content registry), so they slipped through every signal and fell to the unreliable byte-frequency suggester.
+- **New framework-agnostic signal (`AssetDomainCatalog` → `CustomCharacterFrameworkDetector.IntroducesNonBaseCharacter`):** a mod that ships a character-select asset for an id **not in the base roster** (`hornet_char_select.png` → `hornet`) is adding a new playable character — skins reuse the base id, they never mint a new one. This reads the *character the mod ships* rather than the *library it links*, so it covers RitsuLib, BaseLib, and any future framework. Wired into the scanner's assignment auto-heal and custom-character routing, and into the pre-scan rescue so a stale bad assignment is demoted to `_dll_skin_skipped` on the next boot.
+- **Manifest dependency parsing fix:** the BaseLib-dependency check now reads object-form dependencies (`{ "id": "BaseLib", "min_version": "…" }`), not just bare strings — previously an object-form dependency was stringified and never matched.
+
+### Added — "Other Mods" fallback toggle to restore any DLL-blocked mod
+- **Every mod SkinManager DLL-blocks now also appears in the Other Mods tab with a restore checkbox**, floated to the top of the list. If a mod is ever misclassified as a skin and blocked, you no longer have to hunt for the right character dropdown or hand-edit `skin_choices.json` — check the box and the mod is moved to `_dll_skin_skipped` (un-managed) on Save, so STS2 loads it normally next launch. Reuses the existing `skip` save path; the row shows ⛔ (blocked) / ⟳ (pending restore).
+
+### Verified
+- Compiles clean (Debug). Diagnosis confirmed end-to-end against the live `godot.log` (Hornet `[char] → [silent]` + `[dll-block]`) and `skin_choices.json`. **Pending in-game verification** that Hornet appears in Character Select after the change.
+
 ## [0.21.0] - 2026-06-30
 
 ### Changed — load-order self-bootstrap no longer fights other "force-first" mods

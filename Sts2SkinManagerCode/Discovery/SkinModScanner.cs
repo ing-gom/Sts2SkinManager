@@ -74,6 +74,11 @@ public static class SkinModScanner
             var chars = scan.Characters;
             var isCardMod = scan.IsCardMod;
             var domainsLabel = scan.ToLabel();
+            // Framework-agnostic custom-character signal: the pck ships a char-select asset for a
+            // non-base character id (HornetMod → `hornet`). Catches RitsuLib / non-BaseLib custom
+            // characters that carry none of the BaseLib indicator paths, so they're routed to
+            // skippedCustomCharacterMods (auto-mount) instead of being mis-classified as a base skin.
+            var introducesNonBaseChar = CustomCharacterFrameworkDetector.IntroducesNonBaseCharacter(scan.CharSelectIds, baseCharacters);
 
             var pckId = Path.GetFileNameWithoutExtension(pck);
             // ModId is the pck filename — same name in different subfolders would collide silently.
@@ -110,11 +115,13 @@ public static class SkinModScanner
                 var hasNonBaseCharPath = baseCharacters.Count > 0 && chars.Any(c => !baseCharacters.Contains(c));
                 var declaresCustomCharFramework = chars.Count == 0
                     && CustomCharacterFrameworkDetector.IsCustomCharacterMod(modDir, pckId);
-                if (hasNonBaseCharPath || declaresCustomCharFramework)
+                if (hasNonBaseCharPath || declaresCustomCharFramework || introducesNonBaseChar)
                 {
                     var reason = hasNonBaseCharPath
                         ? $"pck adds non-base character [{string.Join(",", chars)}]"
-                        : "manifest declares BaseLib dependency or DLL references CustomCharacterModel";
+                        : declaresCustomCharFramework
+                            ? "manifest declares BaseLib dependency or DLL references CustomCharacterModel"
+                            : $"pck ships char-select asset for non-base character [{string.Join(",", scan.CharSelectIds)}]";
                     MainFile.Logger.Warn($"dll skin assignment '{pckId}' → '{assignedChar}' contradicts mod signature ({reason}). Ignoring assignment; treating as custom-character mod. Remove the entry from _dll_skin_assignments in skin_choices.json to silence this warning.");
                 }
                 else if (baseCharacters.Count == 0 || baseCharacters.Contains(assignedChar))
@@ -171,7 +178,7 @@ public static class SkinModScanner
                 result.Add(new DetectedSkinMod(pckId, modDir, pck, SkinModKind.Character,
                     new List<string> { saruChar }, previewPath, IsMixed: false, DomainsLabel: domainsLabel));
             }
-            else if (scan.IsCustomCharacterMod || CustomCharacterFrameworkDetector.IsCustomCharacterMod(modDir, pckId))
+            else if (scan.IsCustomCharacterMod || CustomCharacterFrameworkDetector.IsCustomCharacterMod(modDir, pckId) || introducesNonBaseChar)
             {
                 // BaseLib-style custom-character mod that packs spine under a non-standard path
                 // (no `animations/characters/{X}/`) but ships C# code under `Code/Character/`,
@@ -191,7 +198,12 @@ public static class SkinModScanner
                 // whenever another Ironclad skin was active.
                 //
                 // Skip from classification so the game's normal mod loader keeps it mounted.
-                skippedCustomCharacterMods.Add(new SkippedCustomCharacterMod(pckId, new List<string>(), domainsLabel));
+                // Surface any non-base char-select ids (e.g. `hornet`) so the custom-character panel
+                // can label the row; BaseLib-indicator mods with no char-select id just show empty.
+                var newCharIds = scan.CharSelectIds
+                    .Where(c => baseCharacters.Count == 0 || !baseCharacters.Contains(c))
+                    .ToList();
+                skippedCustomCharacterMods.Add(new SkippedCustomCharacterMod(pckId, newCharIds, domainsLabel));
             }
             else if (isCardMod)
             {

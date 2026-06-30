@@ -3,6 +3,7 @@ using System.IO;
 using System.Linq;
 using System.Text.Json.Nodes;
 using Sts2SkinManager.Config;
+using Sts2SkinManager.Runtime;
 
 namespace Sts2SkinManager.Discovery;
 
@@ -16,6 +17,8 @@ public enum UnifiedModCategory
     EventArt,          // SkinModKind.EventArt (auto-detected from images/ancients/ or images/events/)
     NotManaged,        // User opted out via _dll_skin_skipped; SkinManager leaves it alone
     Pending,           // DLL+pck mod that SkinManager noticed but the user hasn't decided about
+    Blocked,           // SkinManager DLL-blocked this mod (managed as a skin, not the active pick).
+                       // Surfaced here as a fallback restore toggle in case the classification is wrong.
 }
 
 public record UnifiedModItem(
@@ -151,8 +154,49 @@ public static class UnifiedModBuilder
                 DomainsLabel: ""));
         }
 
+        // (3) DLL-blocked mods — SkinManager classified these as a base-character skin variant and
+        //     blocked their assembly because another skin is the active pick. They already appear in
+        //     the character dropdown, but a MISclassified standalone mod / custom character (rare,
+        //     but the byte-frequency suggester can do it for library-based characters) would be stuck
+        //     off with no obvious way back. Surface every blocked mod here as a fallback restore
+        //     toggle: enabling it writes _dll_skin_skipped (un-managed → loads next launch). Added
+        //     even though the modId is already 'seen' as a character variant — this is a deliberate
+        //     second surface, the one place the user can always switch a blocked mod back on.
+        var blockedChar = new Dictionary<string, string>(System.StringComparer.OrdinalIgnoreCase);
+        foreach (var d in scannerDetected)
+            if (d.Kind == SkinModKind.Character && d.Characters.Count > 0)
+                blockedChar[d.ModId] = d.Characters[0];
+
+        var alreadyBlocked = new HashSet<string>(System.StringComparer.OrdinalIgnoreCase);
+        foreach (var modId in ManagedDllRegistry.AllManagedIds)
+        {
+            if (IsKnownNonSkin(modId)) continue;
+            if (customChars.Contains(modId)) continue;
+            if (!alreadyBlocked.Add(modId)) continue;
+
+            var modFolder = LocateModFolder(modsDirs, modId);
+            var manifestPath = modFolder != null ? TryFindManifest(modFolder) : null;
+            var (name, desc) = manifestPath != null ? ReadManifest(manifestPath) : ("", "");
+
+            var dllPath = HarmonyPatchInspector.FindModDllPath(modsDirs, modId);
+            var definesEntities = dllPath != null && EntityDefinitionDetector.InspectFile(modId, dllPath) != null;
+
+            blockedChar.TryGetValue(modId, out var ch);
+            result.Add(new UnifiedModItem(
+                ModId: modId,
+                ManifestName: name,
+                ManifestDescription: desc,
+                Category: UnifiedModCategory.Blocked,
+                Character: ch,
+                DefinesContentEntities: definesEntities,
+                DomainsLabel: ""));
+        }
+
+        // Blocked rows float to the top (they're the actionable "why is my mod missing?" cases);
+        // the rest keep their category order.
         return result
-            .OrderBy(r => (int)r.Category)
+            .OrderBy(r => r.Category == UnifiedModCategory.Blocked ? 0 : 1)
+            .ThenBy(r => (int)r.Category)
             .ThenBy(r => r.ModId, System.StringComparer.OrdinalIgnoreCase)
             .ToList();
     }

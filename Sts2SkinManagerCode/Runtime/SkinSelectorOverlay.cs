@@ -1200,8 +1200,17 @@ public static class SkinSelectorOverlay
         var enabled = 0;
         foreach (var item in _allMods)
         {
-            var bootEnabled = _bootSnapshotModEnabled.TryGetValue(item.ModId, out var be) ? be : true;
-            var eff = _pendingModEnabled.TryGetValue(item.ModId, out var p) ? p : bootEnabled;
+            bool eff;
+            if (item.Category == UnifiedModCategory.Blocked)
+            {
+                // Blocked rows are "enabled" only when the user toggled a pending restore (→ skip).
+                eff = _pendingAllModsDecisions.TryGetValue(item.ModId, out var a) && a == "skip";
+            }
+            else
+            {
+                var bootEnabled = _bootSnapshotModEnabled.TryGetValue(item.ModId, out var be) ? be : true;
+                eff = _pendingModEnabled.TryGetValue(item.ModId, out var p) ? p : bootEnabled;
+            }
             if (eff) enabled++;
         }
         var title = $"🚫 {Strings.Get("tab_other")} ({enabled}/{_allMods.Count})";
@@ -1540,6 +1549,12 @@ public static class SkinSelectorOverlay
 
     private static Control BuildAllModsRow(UnifiedModItem item)
     {
+        // Blocked mods use a different restore path than the is_enabled checkbox: SkinManager blocks
+        // the DLL at load time (TryLoadMod intercept), which is_enabled can't override. Restoring a
+        // blocked mod means un-managing it (_dll_skin_skipped), so it gets its own row builder.
+        if (item.Category == UnifiedModCategory.Blocked)
+            return BuildBlockedModRow(item);
+
         var hbox = new HBoxContainer
         {
             CustomMinimumSize = new Vector2(460, 36),
@@ -1598,6 +1613,70 @@ public static class SkinSelectorOverlay
             nameLabel.Modulate = enabled ? Colors.White : new Color(0.55f, 0.55f, 0.55f);
             status.Text = enabled ? "✓" : "—";
             status.Modulate = enabled ? new Color(0.6f, 0.95f, 0.6f) : new Color(0.55f, 0.55f, 0.55f);
+        }
+        ApplyRowVisual();
+
+        return hbox;
+    }
+
+    // A DLL-blocked mod row. Boot state = blocked (off). Checking the box records a pending "skip"
+    // decision; OnSave moves the mod to _dll_skin_skipped (un-managed), so STS2 loads its DLL next
+    // launch. Unchecking drops the pending decision (stays blocked). Reuses the same _dll_skin_skipped
+    // plumbing OnSave already applies for the All Mods "skip" sentinel.
+    private static Control BuildBlockedModRow(UnifiedModItem item)
+    {
+        var hbox = new HBoxContainer
+        {
+            CustomMinimumSize = new Vector2(460, 36),
+            MouseFilter = Control.MouseFilterEnum.Pass,
+        };
+
+        var pendingRestore = _pendingAllModsDecisions.TryGetValue(item.ModId, out var act) && act == "skip";
+        var check = new CheckBox
+        {
+            ButtonPressed = pendingRestore,
+            CustomMinimumSize = new Vector2(32, 32),
+            TooltipText = Strings.Get("blocked_mod_toggle_tooltip"),
+        };
+        hbox.AddChild(check);
+
+        var status = new Label
+        {
+            CustomMinimumSize = new Vector2(24, 32),
+            VerticalAlignment = VerticalAlignment.Center,
+            HorizontalAlignment = HorizontalAlignment.Center,
+        };
+        hbox.AddChild(status);
+
+        var displayName = string.IsNullOrEmpty(item.ManifestName) ? item.ModId : item.ManifestName;
+        var charTag = string.IsNullOrEmpty(item.Character) ? "" : $"  → {item.Character}";
+        var nameLabel = new Label
+        {
+            Text = $"{displayName}{charTag}",
+            CustomMinimumSize = new Vector2(360, 32),
+            VerticalAlignment = VerticalAlignment.Center,
+            MouseFilter = Control.MouseFilterEnum.Stop,
+            TooltipText = BuildAllModsTooltip(item),
+        };
+        hbox.AddChild(nameLabel);
+
+        check.Toggled += isOn =>
+        {
+            // ON → pending "skip" (un-manage on Save → loads next boot). OFF → drop the decision
+            // (revert to blocked). IsAnyDirty already treats a "skip" whose mod isn't boot-skipped
+            // as dirty, and OnSave maps "skip" → _dll_skin_skipped.
+            if (isOn) _pendingAllModsDecisions[item.ModId] = "skip";
+            else _pendingAllModsDecisions.Remove(item.ModId);
+            ApplyRowVisual();
+            UpdateAllModsHeader();
+        };
+
+        void ApplyRowVisual()
+        {
+            var on = _pendingAllModsDecisions.TryGetValue(item.ModId, out var a) && a == "skip";
+            nameLabel.Modulate = on ? Colors.White : new Color(0.55f, 0.55f, 0.55f);
+            status.Text = on ? "⟳" : "⛔";
+            status.Modulate = on ? new Color(1f, 0.84f, 0.4f) : new Color(0.85f, 0.4f, 0.4f);
         }
         ApplyRowVisual();
 

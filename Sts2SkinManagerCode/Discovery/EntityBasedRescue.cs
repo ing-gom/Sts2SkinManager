@@ -69,9 +69,16 @@ public static class EntityBasedRescue
             var isCosmetic = report == null
                 && !HasCharacterSignal(modFolder, baseCharacters)
                 && CosmeticUtilityDetector.IsGlobalCosmeticMod(dllPath);
-            if (report == null && !isCosmetic)
+            // Signal C (custom character): the mod adds a brand-new character via ANY framework —
+            // BaseLib dependency / CustomCharacterModel base class, OR (framework-agnostic) it ships
+            // a char-select asset for a non-base id. A byte-frequency assignment to a base character
+            // would DLL-block the whole custom character; demote it. Catches RitsuLib characters
+            // (HornetMod → assigned 'silent') that trip neither signal A nor B.
+            var isCustomChar = CustomCharacterFrameworkDetector.IsCustomCharacterMod(modFolder, modId)
+                || CustomCharacterFrameworkDetector.IntroducesNonBaseCharacterByPck(modFolder, modId, baseCharacters);
+            if (report == null && !isCosmetic && !isCustomChar)
             {
-                MainFile.Logger.Info($"dll-skin rescue: '{modId}' (assigned '{assignedChar}') — no content-entity subclasses (signal A) and no content-model texture patches without character signal (signal B), keeping assignment. DLL: {dllPath}");
+                MainFile.Logger.Info($"dll-skin rescue: '{modId}' (assigned '{assignedChar}') — no content-entity subclasses (signal A), no content-model texture patches without character signal (signal B), and no custom-character signal (signal C), keeping assignment. DLL: {dllPath}");
                 continue;
             }
 
@@ -79,7 +86,16 @@ public static class EntityBasedRescue
             choices.DllSkinSkipped.Add(modId);
             rescued.Add(modId);
 
-            if (report != null)
+            if (report == null && isCustomChar)
+            {
+                MainFile.Logger.Warn(
+                    $"dll-skin rescue: '{modId}' was assigned as '{assignedChar}' skin but adds a " +
+                    $"brand-new character (custom-character framework signal — BaseLib/CustomCharacterModel " +
+                    $"or a char-select asset for a non-base id). Assigning it as a base skin would DLL-block " +
+                    $"the new character whenever the base uses 'default' or another skin. " +
+                    $"Treating as custom-character mod, moving to _dll_skin_skipped. Restart STS2 to restore the mod's DLL.");
+            }
+            else if (report != null)
             {
                 MainFile.Logger.Warn(
                     $"dll-skin rescue: '{modId}' was assigned as '{assignedChar}' skin but defines " +

@@ -67,6 +67,7 @@ public static class Strings
             ["skin_manager_section_header"] = "Skin manager",
             ["all_mods_panel_header"] = "Other mods",
             ["all_mods_panel_help"] = "Character skin variants, content mods, and DLL mods that don't fit Card or Mixed tabs. Toggle the checkbox to enable/disable management. Pick a base character to force the mod into that skin slot (its DLL will be blocked when another skin is active).",
+            ["blocked_mod_toggle_tooltip"] = "Skin Manager blocked this mod's DLL (it was classified as a skin for another character that isn't active). If it's actually a standalone mod/character, check the box to restore it — it will be left un-managed and load normally on next launch.",
             ["all_mods_action_auto"] = "Auto",
             ["all_mods_action_skip"] = "Don't manage",
             ["all_mods_action_skin_for"] = "Skin for {0}",

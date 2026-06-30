@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Text.RegularExpressions;
 
@@ -67,6 +68,33 @@ public static class AssetDomainCatalog
         RegexOptions.IgnoreCase | RegexOptions.Compiled
     );
 
+    // Character ids extracted from character-select asset filenames. Three layout conventions:
+    //   {id}_char_select(_bg/_locked).png    — modded new-character portrait (HornetMod ships
+    //                                           `images/hornet_char_select.png` → id `hornet`)
+    //   char_select_bg_{id}.png/.tscn         — STS2 base char-select background (`char_select_bg_defect`)
+    //   animations/character_select/{id}/     — char-select spine directory
+    // A mod that ships a char-select asset for an id NOT in the base roster is introducing a brand-
+    // new playable character — skins reuse the BASE character's id, they never mint a new one. This
+    // is the framework-AGNOSTIC "adds a character" signal: it fires for RitsuLib, BaseLib, or any
+    // future custom-character framework without needing to know the framework, because it reads the
+    // character the mod ships rather than the library it links. Complements
+    // CustomCharacterIndicatorRegex (which only catches BaseLib's Code/Character / CustomCharacterModel
+    // / root characters.json conventions and so misses RitsuLib-packed characters like Hornet).
+    private static readonly Regex[] CharSelectIdRegexes =
+    {
+        new(@"([a-z][a-z0-9]+)_char_select", RegexOptions.IgnoreCase | RegexOptions.Compiled),
+        new(@"char_select_bg_([a-z][a-z0-9]+)", RegexOptions.IgnoreCase | RegexOptions.Compiled),
+        new(@"animations/character_select/([a-z][a-z0-9_]+)/", RegexOptions.IgnoreCase | RegexOptions.Compiled),
+    };
+
+    // Generic char-select asset tokens that are layer/state names, never a character id. Guards the
+    // capture groups above from treating `char_select_bg` / `..._locked` as a "new character".
+    private static readonly HashSet<string> CharSelectIdStopwords = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "bg", "locked", "hover", "frame", "glow", "mask", "default", "portrait",
+        "icon", "button", "panel", "select", "new", "base", "temp", "placeholder",
+    };
+
     // Event / Ancient retexture mods — Neow-equivalent NPC portraits under
     // `images/ancients/{name}_placeholder.png` and event scene backgrounds under
     // `images/events/{event_name}.png`. Mods using namespaced asset paths
@@ -88,7 +116,8 @@ public static class AssetDomainCatalog
         int CardPortraitsHits,
         int CustomCharacterIndicatorHits,
         int CharSelectAssetHits,
-        int EventArtHits)
+        int EventArtHits,
+        IReadOnlySet<string> CharSelectIds)
     {
         public bool HasCardArt => CardArtHits > 0;
         public bool HasCardPortraits => CardPortraitsHits > 0;
@@ -118,6 +147,7 @@ public static class AssetDomainCatalog
     public static PathScan ScanPaths(IEnumerable<string> paths)
     {
         var chars = new HashSet<string>();
+        var charSelectIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         int spineHits = 0, cardArtHits = 0, cardPortraitsHits = 0, customCharHits = 0, charSelectHits = 0, eventArtHits = 0;
 
         foreach (var p in paths)
@@ -133,8 +163,15 @@ public static class AssetDomainCatalog
             if (CustomCharacterIndicatorRegex.IsMatch(p)) customCharHits++;
             if (CharSelectAssetRegex.IsMatch(p)) charSelectHits++;
             if (EventArtRegex.IsMatch(p)) eventArtHits++;
+            foreach (var rx in CharSelectIdRegexes)
+            {
+                var cm = rx.Match(p);
+                if (!cm.Success) continue;
+                var id = cm.Groups[1].Value.ToLowerInvariant();
+                if (!CharSelectIdStopwords.Contains(id)) charSelectIds.Add(id);
+            }
         }
 
-        return new PathScan(chars, spineHits, cardArtHits, cardPortraitsHits, customCharHits, charSelectHits, eventArtHits);
+        return new PathScan(chars, spineHits, cardArtHits, cardPortraitsHits, customCharHits, charSelectHits, eventArtHits, charSelectIds);
     }
 }
