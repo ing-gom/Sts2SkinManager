@@ -38,8 +38,25 @@ public static class RestartCountdownModal
         ShowOrResetInner(managerDataDir, seconds, titleKey, bodyKey);
     }
 
+    // Headless / automated boots (e.g. --headless dump runs) have no user to read the prompt, and a
+    // 10s auto-restart would relaunch the process in a loop. The file mutations that warrant the
+    // restart already happened synchronously before this call, so skipping the prompt is safe and
+    // correct — the new load order / enable flags take effect on the next real launch.
+    private static bool IsHeadlessBoot()
+    {
+        try { if (DisplayServer.GetName() == "headless") return true; } catch { }
+        try { foreach (var a in OS.GetCmdlineArgs()) if (a == "--headless") return true; } catch { }
+        return false;
+    }
+
     private static void ShowOrResetInner(string managerDataDir, int seconds, string titleKey, string bodyKey)
     {
+        if (IsHeadlessBoot())
+        {
+            MainFile.Logger.Info("headless boot — skipping restart prompt.");
+            return;
+        }
+
         var mainLoop = Engine.GetMainLoop();
         if (mainLoop is not SceneTree tree)
         {

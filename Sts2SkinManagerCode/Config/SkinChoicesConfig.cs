@@ -60,6 +60,20 @@ public class SkinChoicesConfig
     // scene/image paths to vanilla base assets. Persisted as _vanilla_body_mods.
     public HashSet<string> VanillaBodyMods { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
+    // True if SkinManager performed a load-order reorder on the PREVIOUS boot. If a reorder
+    // happened last boot and we STILL find ourselves behind a managed skin mod this boot, another
+    // "force-first" mod is overriding us — MainFile escalates to a deterministic fix in one boot
+    // instead of looping restarts. Persisted as _load_order_reordered_last_boot.
+    public bool LoadOrderReorderedLastBoot { get; set; }
+
+    // Skin mods we resolved a load-order conflict for by persistently DISABLING them in
+    // settings.save (is_enabled=false), rather than relying on winning the load-order war. The game
+    // strips disabled mods before any mod loads, so they can't grab the front again. These ids are
+    // excluded from reorder targets (order is moot for a mod that never loads) and auto-healed
+    // (re-enabled) when the user actively picks that skin or the mod is uninstalled. Persisted as
+    // _load_order_resolved_by_disable.
+    public HashSet<string> LoadOrderResolvedByDisable { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
     private static readonly JsonSerializerOptions JsonOpts = new()
     {
         WriteIndented = true,
@@ -133,6 +147,19 @@ public class SkinChoicesConfig
                 root.Remove("_vanilla_body_mods");
             }
 
+            if (root.TryGetPropertyValue("_load_order_reordered_last_boot", out var reorderedNode) && reorderedNode != null)
+            {
+                try { cfg.LoadOrderReorderedLastBoot = reorderedNode.GetValue<bool>(); } catch { cfg.LoadOrderReorderedLastBoot = false; }
+                root.Remove("_load_order_reordered_last_boot");
+            }
+
+            if (root.TryGetPropertyValue("_load_order_resolved_by_disable", out var resolvedNode) && resolvedNode != null)
+            {
+                var deserialized = JsonSerializer.Deserialize<List<string>>(resolvedNode.ToJsonString(), JsonOpts);
+                if (deserialized != null) cfg.LoadOrderResolvedByDisable = new HashSet<string>(deserialized, StringComparer.OrdinalIgnoreCase);
+                root.Remove("_load_order_resolved_by_disable");
+            }
+
             root.Remove("_preview_visible"); // legacy v0.4.0-dev key, ignored
 
             cfg.Characters = JsonSerializer.Deserialize<Dictionary<string, CharacterSkinChoice>>(root.ToJsonString(), JsonOpts) ?? new(StringComparer.OrdinalIgnoreCase);
@@ -186,6 +213,17 @@ public class SkinChoicesConfig
         {
             var node = JsonNode.Parse(JsonSerializer.Serialize(VanillaBodyMods.ToList(), JsonOpts));
             if (node != null) root["_vanilla_body_mods"] = node;
+        }
+
+        // Persist load-order conflict state only while non-default, to keep the file clean.
+        if (LoadOrderReorderedLastBoot)
+        {
+            root["_load_order_reordered_last_boot"] = JsonValue.Create(true);
+        }
+        if (LoadOrderResolvedByDisable.Count > 0)
+        {
+            var node = JsonNode.Parse(JsonSerializer.Serialize(LoadOrderResolvedByDisable.ToList(), JsonOpts));
+            if (node != null) root["_load_order_resolved_by_disable"] = node;
         }
 
         var json = root.ToJsonString(JsonOpts);

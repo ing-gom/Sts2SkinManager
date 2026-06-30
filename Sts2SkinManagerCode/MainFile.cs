@@ -155,25 +155,9 @@ public partial class MainFile : Node
         }
 
         var settings = Sts2SettingsWriter.FindAndLoad(userDataDir);
-        var fileReordered = settings != null && LoadOrderEnforcer.EnsureFirstInModList(settings, ModId);
-        if (fileReordered && settings != null) Sts2SettingsWriter.Save(settings);
-
-        var memoryReordered = LoadOrderEnforcer.EnsureFirstInMods(ModId);
-        if (fileReordered || memoryReordered)
-        {
-            Logger.Warn($"self-bootstrap: file_reorder={fileReordered} memory_reorder={memoryReordered}. " +
-                        "*** RESTART STS2 ONCE *** for full activation.");
-        }
-
-        // Show restart modal only if the persisted settings.save was reordered. That means *next*
-        // boot needs a restart to actually pick up the new load order — without restart, character
-        // mods loaded before us this session still have their Harmony patches live (e.g. Booba's
-        // scale override). In-memory reorder alone has no effect this boot since TryLoadMod calls
-        // already happened in the original order.
-        if (fileReordered)
-        {
-            RestartCountdownModal.ShowOrReset(managerDataDir, 10, "load_order_modal_title", "load_order_modal_body");
-        }
+        // NOTE: the load-order self-bootstrap (deciding whether to reorder ahead of, or disable, the
+        // skin mods we suppress) runs LATER — after `keepDllModIds` is computed — because we only
+        // need to precede the skins we actually block, not the active pick. See below.
 
         var choicesPath = Path.Combine(managerDataDir, "skin_choices.json");
 
@@ -312,6 +296,8 @@ public partial class MainFile : Node
             }
         }
 
+        ApplyLoadOrderBootstrap(settings, characterMods, keepDllModIds, choices, choicesPath, managerDataDir);
+
         if (settings != null && cardMods.Count > 0)
         {
             var settingsChanged = CardPackApplier.ApplyToSettings(settings, choices.CardPacks, cardMods);
@@ -406,6 +392,119 @@ public partial class MainFile : Node
             // detection service short-circuits before suggesting.
             var customCharacterIds = skippedCustom.Select(s => s.ModId).ToList();
             DllSkinDetectionService.ScheduleAfter(tree, modRoots, choicesPath, managerDataDir, baseCharacters, alreadyDetectedIds, customCharacterIds);
+        }
+    }
+
+    // Keep SkinManager loading BEFORE the skin mods it suppresses (so its TryLoadMod prefix can
+    // disable them at runtime), without fighting unrelated "force-first" mods.
+    //
+    // Strategy:
+    //  1. Targets = the character skins we actually block (not the active pick) and haven't already
+    //     resolved via persistent-disable. We only need to precede these.
+    //  2. If we sit behind a target, reorder ourselves just ahead of it (one restart, picked up next
+    //     boot). We record that we reordered.
+    //  3. If we reordered LAST boot and we're STILL behind a target, another mod keeps grabbing the
+    //     front — a war we can't win by reordering. Escalate: persistently disable the blocking
+    //     skin(s) via is_enabled=false. The game strips disabled mods before any mod loads, so they
+    //     can't re-sort themselves — the conflict ends deterministically in one restart.
+    //  4. Auto-heal: if the user later picks a skin we'd disabled (it's now a "keep"), re-enable it;
+    //     drop entries whose mod is gone.
+    private static void ApplyLoadOrderBootstrap(
+        Sts2SettingsFile? settings,
+        List<DetectedSkinMod> characterMods,
+        HashSet<string> keepDllModIds,
+        SkinChoicesConfig choices,
+        string choicesPath,
+        string managerDataDir)
+    {
+        if (settings == null) return;
+
+        var detectedCharIds = new HashSet<string>(characterMods.Select(d => d.ModId), StringComparer.OrdinalIgnoreCase);
+
+        // Auto-heal the resolved-by-disable set. Re-enabling needs a restart (the game loads it next
+        // boot); a stale entry (mod uninstalled) is just forgotten.
+        var enableChanges = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+        foreach (var id in choices.LoadOrderResolvedByDisable.ToList())
+        {
+            if (keepDllModIds.Contains(id))
+            {
+                enableChanges[id] = true; // user actively wants this skin now — undo our disable.
+                choices.LoadOrderResolvedByDisable.Remove(id);
+            }
+            else if (!detectedCharIds.Contains(id))
+            {
+                choices.LoadOrderResolvedByDisable.Remove(id); // mod gone; nothing to re-enable.
+            }
+        }
+
+        // We only need to precede skins we suppress AND haven't already disabled (a disabled mod
+        // never loads, so order is irrelevant for it).
+        var loadOrderTargets = characterMods
+            .Where(d => !keepDllModIds.Contains(d.ModId) && !choices.LoadOrderResolvedByDisable.Contains(d.ModId))
+            .Select(d => d.ModId)
+            .ToList();
+
+        var needsReorder = LoadOrderEnforcer.NeedsReorderInModList(settings, ModId, loadOrderTargets);
+        var escalate = needsReorder && choices.LoadOrderReorderedLastBoot;
+
+        var fileReordered = false;
+        var settingsChanged = false;
+        var disabledForConflict = new List<string>();
+
+        if (escalate)
+        {
+            // The mods actually blocking us — disable them so they don't load (and can't re-sort).
+            disabledForConflict = LoadOrderEnforcer.TargetsAheadOfSelf(settings, ModId, loadOrderTargets);
+            foreach (var id in disabledForConflict)
+            {
+                enableChanges[id] = false;
+                choices.LoadOrderResolvedByDisable.Add(id);
+            }
+        }
+        else if (needsReorder)
+        {
+            fileReordered = LoadOrderEnforcer.EnsureBeforeTargetsInModList(settings, ModId, loadOrderTargets);
+        }
+
+        if (enableChanges.Count > 0)
+        {
+            settingsChanged = Sts2SettingsWriter.ApplyModEnabledState(settings, enableChanges);
+            Sts2SettingsWriter.MutateInMemoryModList(enableChanges);
+        }
+
+        // In-memory tidy only — no effect this boot (TryLoadMod already ran in the old order), it
+        // just prevents a misleading "reordered" warning once we're settled ahead of our targets.
+        var memoryReordered = LoadOrderEnforcer.EnsureBeforeTargetsInMods(ModId, loadOrderTargets);
+
+        // Record whether we reordered, so next boot can tell a fix didn't stick (the war signal).
+        choices.LoadOrderReorderedLastBoot = fileReordered;
+        choices.Save(choicesPath);
+
+        if (fileReordered || settingsChanged) Sts2SettingsWriter.Save(settings);
+
+        if (fileReordered || settingsChanged || memoryReordered)
+        {
+            Logger.Warn($"self-bootstrap: file_reorder={fileReordered} disabled=[{string.Join(",", disabledForConflict)}] " +
+                        $"reenabled=[{string.Join(",", enableChanges.Where(kv => kv.Value).Select(kv => kv.Key))}] mem={memoryReordered}. " +
+                        "*** RESTART STS2 ONCE *** for full activation.");
+        }
+
+        // Restart prompts (all auto-restart with a "restart later" option):
+        //  - escalation that disabled a conflicting skin → "conflict resolved" message
+        //  - a plain reorder → first-setup message
+        //  - re-enable only (user re-picked a previously-disabled skin) → generic skin-change message
+        if (escalate && disabledForConflict.Count > 0)
+        {
+            Logger.Warn($"load-order conflict: SkinManager kept landing behind its managed skin mods despite reordering. Auto-resolved by disabling [{string.Join(",", disabledForConflict)}] in the mod list.");
+            RestartCountdownModal.ShowOrReset(managerDataDir, 10, "load_order_conflict_title", "load_order_conflict_body");
+        }
+        else if (fileReordered)
+        {
+            RestartCountdownModal.ShowOrReset(managerDataDir, 10, "load_order_modal_title", "load_order_modal_body");
+        }
+        else if (settingsChanged)
+        {
+            RestartCountdownModal.ShowOrReset(managerDataDir, 10, "modal_title", "modal_body");
         }
     }
 

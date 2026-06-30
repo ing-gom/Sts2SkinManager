@@ -4,6 +4,27 @@ All notable changes to Sts2SkinManager are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.21.0] - 2026-06-30
+
+### Changed — load-order self-bootstrap no longer fights other "force-first" mods
+- **SkinManager now only ensures it loads *before the skin mods it manages*, not absolute-first in the mod list.** Previously it pulled itself to index 0 of `settings.save`'s `mod_list` on every boot where it wasn't already first. That meant any *other* mod that also forces itself to the front (a core-patch or UI framework) could trigger a tug-of-war: each boot one mod reorders ahead of the other, re-arming the restart modal indefinitely.
+- The new rule (`LoadOrderEnforcer.EnsureBeforeTargetsInModList`) computes the earliest mod_list index among the detected character-skin mods and only moves SkinManager when it sits *at or behind* that target — placing it just ahead of the earliest skin mod. Unrelated front-runners are ignored: they can keep index 0 forever, because SkinManager only needs to precede the mods its `TryLoadMod` / `LoadResourcePack` prefixes manage. Since the game appends newly-installed mods to the **end** of the list (`SortModList` gives un-listed mods priority `999999999`), later additions land behind us automatically — no re-trigger.
+
+### Added — deterministic auto-resolution of an unwinnable load-order war
+- **The reorder target is now precise: only the character skins SkinManager actually *suppresses*** (every detected skin minus the active pick and minus any already resolved by disable). It no longer tries to precede the skin you actually chose — order is irrelevant for a mod it doesn't block. A side benefit: with no suppressed skins, SkinManager stops forcing a reorder/restart at all.
+- **One-boot conflict detection.** A persisted `_load_order_reordered_last_boot` flag records whether we reordered. If we reordered last boot and are *still* behind a suppressed skin this boot, another "force-first" mod is overriding us — detected in a single restart instead of several.
+- **Auto-resolve by persistent-disable instead of giving up.** On detection, the blocking skin mod(s) are disabled in `settings.save` (`is_enabled = false`). Because the game's `RemoveDisabledMods` strips disabled mods *before any mod loads*, the competing mod can't re-sort itself to the front — its code never runs. The conflict ends deterministically in one restart, with no user action. The visual result is identical (a suppressed skin doesn't apply either way); the mod simply shows as disabled in the game's own mod menu. Resolved ids are tracked in `_load_order_resolved_by_disable`.
+- **Auto-heal.** If the user later picks a skin we'd disabled, it is re-enabled automatically (one restart); entries for uninstalled mods are dropped.
+- A "conflict resolved" restart prompt (`load_order_conflict_title` / `load_order_conflict_body`) across all 16 languages.
+
+### Fixed
+- **Duplicate mod_list entries no longer trigger a spurious reorder.** Real `settings.save` files can list the same mod id more than once (observed: `Sts2SkinManager` at both index 0 and index 59). The position lookup now uses each id's FIRST occurrence, so a stray late duplicate of ourselves is no longer read as "behind the skin mods" and does not cause a needless reorder/restart on every boot.
+- **No restart prompt during headless / automated boots.** `RestartCountdownModal` now no-ops when `DisplayServer.GetName() == "headless"` (or `--headless` is on the command line). The file mutations that warrant the restart already happened synchronously, so the next real launch picks them up — this just prevents a 10-second auto-restart from relaunching a headless process in a loop.
+
+### Verified
+- Pure load-order logic covered by an offline harness (19 cases incl. reorder index math, front-runner-ignore, duplicate lists).
+- All four runtime paths exercised end-to-end via real `--headless` boots against the live mod set (13 skin mods): regression (no-op), first reorder, conflict escalation (disable), and auto-heal (re-enable) — each confirmed against the resulting `settings.save` / `skin_choices.json` and logs.
+
 ## [0.20.0] - 2026-06-19
 
 ### Added — Applied tab now shows each mod's *actual* load state
