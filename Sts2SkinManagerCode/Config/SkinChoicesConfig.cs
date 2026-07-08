@@ -60,6 +60,12 @@ public class SkinChoicesConfig
     // scene/image paths to vanilla base assets. Persisted as _vanilla_body_mods.
     public HashSet<string> VanillaBodyMods { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
+    // Mirror of VanillaBodyMods for the other axis: mixed mods (skin + cards, e.g. raye) the user set
+    // to "keep body, vanilla cards". For these, MainFile keeps the mod's pck mounted (so its body/spine
+    // stays) and mounts a generated overlay (VanillaCardsOverlayBuilder) that re-points the mod's card
+    // art paths to vanilla base assets. Persisted as _vanilla_cards_mods.
+    public HashSet<string> VanillaCardsMods { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
     // True if SkinManager performed a load-order reorder on the PREVIOUS boot. If a reorder
     // happened last boot and we STILL find ourselves behind a managed skin mod this boot, another
     // "force-first" mod is overriding us — MainFile escalates to a deterministic fix in one boot
@@ -147,6 +153,13 @@ public class SkinChoicesConfig
                 root.Remove("_vanilla_body_mods");
             }
 
+            if (root.TryGetPropertyValue("_vanilla_cards_mods", out var vcNode) && vcNode != null)
+            {
+                var deserialized = JsonSerializer.Deserialize<List<string>>(vcNode.ToJsonString(), JsonOpts);
+                if (deserialized != null) cfg.VanillaCardsMods = new HashSet<string>(deserialized, StringComparer.OrdinalIgnoreCase);
+                root.Remove("_vanilla_cards_mods");
+            }
+
             if (root.TryGetPropertyValue("_load_order_reordered_last_boot", out var reorderedNode) && reorderedNode != null)
             {
                 try { cfg.LoadOrderReorderedLastBoot = reorderedNode.GetValue<bool>(); } catch { cfg.LoadOrderReorderedLastBoot = false; }
@@ -213,6 +226,12 @@ public class SkinChoicesConfig
         {
             var node = JsonNode.Parse(JsonSerializer.Serialize(VanillaBodyMods.ToList(), JsonOpts));
             if (node != null) root["_vanilla_body_mods"] = node;
+        }
+
+        if (VanillaCardsMods.Count > 0)
+        {
+            var node = JsonNode.Parse(JsonSerializer.Serialize(VanillaCardsMods.ToList(), JsonOpts));
+            if (node != null) root["_vanilla_cards_mods"] = node;
         }
 
         // Persist load-order conflict state only while non-default, to keep the file clean.

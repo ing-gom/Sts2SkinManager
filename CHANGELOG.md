@@ -4,6 +4,34 @@ All notable changes to Sts2SkinManager are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.25.0] - 2026-07-08
+
+### Added — "Vanilla cards / Mod cards" toggle for mixed mods (choose the body and the card art independently)
+- Mixed mods bundle a character reskin **and** custom card art in one pck. You could already keep the cards and revert the body (the 🧍 "Selected look / Mod look" toggle, v0.15.0). This adds the **card mirror**: a per-row **🃏 "Vanilla cards / Mod cards"** toggle in the Mixed panel. The two toggles are independent, so a mixed mod can be shown as any combination of {mod / vanilla} body × {mod / vanilla} cards.
+- The toggle only appears for mixed mods that actually bundle card art (`VanillaCardsOverlayBuilder.HasRevertibleCards`); mods with none never show it.
+- Persisted as `_vanilla_cards_mods` in `skin_choices.json`; surfaced in the Applied summary as a `(🃏 …)` tag. Labels + tooltips localized in all 14 languages.
+
+### How it works — a Harmony prefix on `CardModel.PortraitPath`, not a pck overlay
+- Card art in STS2 is resolved through a code path (`CardModel.PortraitPath`, a `virtual` getter that frameworks like RitsuLib/ATA already Harmony-patch), **above** the resource filesystem. So a mounted base-game overlay pck can never win — mounting is invisible to the resolver. Both directions of this toggle are therefore driven by our own higher-priority (`Priority.First`) prefix on that getter (`CardVanillaPortraitPatch`), which recomputes the path and short-circuits, beating any framework prefix and the original getter.
+- **Vanilla cards** (revert to stock): for a flagged character's pool, force the stock atlas path `res://images/atlases/card_atlas.sprites/{pool}/{entry}.tres`. This reverts both direct-override skins **and** framework-injected (RitsuLib/ATA) card art, which a pck overlay could not touch.
+- **Mod cards** (surface the mod's art): a direct-override mixed skin (e.g. `raye`) ships its card art as a card-atlas `.tres.remap`, which **Godot ignores for a late-mounted pack** — so the card stays vanilla even though the mod is selected. But it also ships the packed portrait png as a direct `.ctex` byte-override at the base path (the same mechanism that makes its **body** work). For each mounted, non-reverted mixed mod we collect those cards (`CollectPackedPortraitCardKeys`) and redirect their `PortraitPath` to `res://images/packed/card_portraits/{pool}/{entry}.png`, where the mod's ctex override wins — and which is also the exact path RitsuLib uses for card injection.
+
+### Verification
+- `raye` selected: log confirms `mod-cards (Harmony): surfacing … [ironclad/break]` and `vanilla-cards (Harmony): forcing stock card art [ironclad]` for the two directions. `raye` ships exactly one custom card (`break`; ctex 599 KB vs base 241 KB). Debug + Release build clean. **In-game visual confirmation of the mod-cards direction pending** (needs `break` in the deck).
+
+## [0.24.0] - 2026-07-02
+
+### Fixed — skins now load on macOS (Steam Workshop skins were invisible; character skins mis-classified)
+- **Steam Workshop skins were never discovered on macOS.** SkinManager derived the workshop content root *relative to the executable* (`gameDir/../../workshop/content/<appId>`). That holds on Windows/Linux, where the executable sits directly in `steamapps/common/<game>/`, but on macOS the executable is buried in `SlayTheSpire2.app/Contents/MacOS/`, so climbing two levels lands **inside the .app bundle** — the workshop folder is never found and no workshop-subscribed skin appears in the manager. Fix: read each subscribed mod's install folder back from STS2's own `ModManager.Mods`, which the game resolves via the Steam API (`SteamUGC.GetItemInstallInfo`) as an **absolute path that is correct on every OS**, and climb to the shared `content/<appId>` root. The old relative derivation is kept only as a Windows/Linux fallback for when `ModManager` yields nothing (e.g. Steam not initialised).
+- **Character skins were mis-classified on macOS because the base-character roster came up empty.** `ScanBaseCharacters` read `SlayTheSpire2.pck` from next to the executable; inside the macOS app bundle that resource lives in `Contents/Resources/` (STS2 itself probes the same `../Resources` path for `release_info.json`). With no base roster, every character skin failed the "skin for an existing character" test and was dropped. Fix: probe `Contents/Resources/SlayTheSpire2.pck` as well; first hit wins.
+- **Auto-restart is now cross-platform.** The "apply → restart" helper only ever wrote a Windows `.bat`, so even a detected skin couldn't be applied on macOS/Linux. It now branches on OS: Windows keeps the batch script; macOS/Linux write a POSIX `sh` helper that waits for the game process to exit (by pid) and relaunches via Steam's URL handler (`open` on macOS, `xdg-open` on Linux).
+
+### Why
+- A macOS user reported that skin mods do not load. Root cause was OS-specific path handling, not the skins themselves: the game is packaged as a `.app` bundle on macOS, which invalidates every executable-relative path assumption made for Windows.
+
+### Note
+- All three changes are no-ops on Windows (same resolved path de-duplicated / first-candidate hit / OS-gated branch), so existing Windows behavior is unchanged. Compiles clean (Debug + Release). **Pending in-game verification on macOS** — developed and built on Windows; logic is grounded in the decompiled game's own macOS path handling but not yet confirmed on a real macOS install.
+
 ## [0.23.0] - 2026-07-01
 
 ### Changed — block early-loading skins by disabling them, never by reordering the mod list

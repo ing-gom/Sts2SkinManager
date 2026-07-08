@@ -25,11 +25,28 @@ public static class SkinModScanner
     public static HashSet<string> ScanBaseCharacters(string gameDir)
     {
         var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var basePck = Path.Combine(gameDir, "SlayTheSpire2.pck");
-        if (!File.Exists(basePck)) return result;
+        var basePck = FindBasePck(gameDir);
+        if (basePck == null) return result;
         var scan = AssetDomainCatalog.ScanPaths(PckPathReader.ReadAssetPaths(basePck));
         foreach (var c in scan.Characters) result.Add(c);
         return result;
+    }
+
+    // The base game pck sits next to the executable on Windows/Linux. Inside the macOS app bundle the
+    // executable is in Contents/MacOS/ while Godot resource files live in Contents/Resources/ — STS2
+    // itself probes that same ../Resources location for release_info.json. Probe both; first hit wins.
+    // Returns null (→ empty base roster) if neither exists, which would drop every character skin, so
+    // this path matters on macOS specifically.
+    private static string? FindBasePck(string gameDir)
+    {
+        string[] candidates =
+        {
+            Path.Combine(gameDir, "SlayTheSpire2.pck"),
+            Path.Combine(gameDir, "..", "Resources", "SlayTheSpire2.pck"),
+        };
+        foreach (var c in candidates)
+            if (File.Exists(c)) return c;
+        return null;
     }
 
     // Probed in order; first hit wins.

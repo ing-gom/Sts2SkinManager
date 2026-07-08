@@ -17,6 +17,7 @@ A Slay the Spire 2 mod that manages installed **character skin mods**, **card sk
   - **Character skin dropdown** — pick which variant is active per character. Mixed mods get a `📦` indicator + per-item tooltip
   - **Card skin tab** — toggle individual packs, reorder priority (top wins for overlapping cards), drag-and-drop or ↑/↓ arrows
   - **Mixed mods tab** — toggle mixed mods independently of the dropdown choice. Layer their extras (cards, events) on top of a different main-spine pick; the dropdown's spine always wins overlapping paths
+- **Per-part control for mixed mods** — a mixed mod bundles a character **body** and **card art** in one `.pck`. In the Mixed mods tab each such mod gets two independent toggles: **🧍 Selected look / Mod look** (body) and **🃏 Vanilla cards / Mod cards** (cards). Mix and match — e.g. keep one mod's body but show stock card art, in any combination. Reverting cards to vanilla works even against framework-injected (RitsuLib/ATA) card art, which a plain `.pck` can't override.
 - **Skin preview on hover** — see what a skin looks like *before* committing:
   - Character skin → hover the 👁 icon beside the dropdown
   - Card skin → hover the row's label

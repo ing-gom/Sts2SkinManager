@@ -19,6 +19,8 @@ public static class SkinSelectorOverlay
     private static List<DetectedSkinMod> _mixedMods = new();
     // Mixed mods that bundle a revertible body (ATA-style) — only these show the look toggle.
     private static IReadOnlySet<string> _vanillaBodyEligible = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+    // Mixed mods that bundle revertible card art (raye-style) — only these show the card toggle.
+    private static IReadOnlySet<string> _vanillaCardsEligible = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
     private static List<UnifiedModItem> _allMods = new();
     private static IReadOnlySet<string> _baseCharacters = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
     // Custom-character mods (BaseLib-style new characters, e.g. Watcher / Ryoshu). SkinManager
@@ -78,6 +80,8 @@ public static class SkinSelectorOverlay
     // Mixed mods the user flagged "vanilla body (keep cards)" — surfaced as a per-row 🧍 toggle in
     // the mixed-addon panel. Committed to choices.VanillaBodyMods on OnSave (→ _vanilla_body_mods).
     private static HashSet<string> _pendingVanillaBody = new(StringComparer.OrdinalIgnoreCase);
+    // Mirror of _pendingVanillaBody for the card axis. Committed to choices.VanillaCardsMods on OnSave.
+    private static HashSet<string> _pendingVanillaCards = new(StringComparer.OrdinalIgnoreCase);
     private static readonly Dictionary<string, string> _pendingActiveByCharacter = new(StringComparer.OrdinalIgnoreCase);
     // Per-mod pending override from the All Mods tab. The action sentinel encodes the user's
     // chosen target classification — currently only "skip" is reachable from the UI (via the
@@ -90,6 +94,7 @@ public static class SkinSelectorOverlay
     private static CardPacksConfig? _bootSnapshotCardPacks;
     private static CardPacksConfig? _bootSnapshotMixedAddons;
     private static HashSet<string> _bootSnapshotVanillaBody = new(StringComparer.OrdinalIgnoreCase);
+    private static HashSet<string> _bootSnapshotVanillaCards = new(StringComparer.OrdinalIgnoreCase);
     private static readonly Dictionary<string, string> _bootSnapshotActive = new(StringComparer.OrdinalIgnoreCase);
     private static readonly Dictionary<string, string> _bootSnapshotDllAssignments = new(StringComparer.OrdinalIgnoreCase);
     private static readonly HashSet<string> _bootSnapshotDllSkipped = new(StringComparer.OrdinalIgnoreCase);
@@ -120,7 +125,8 @@ public static class SkinSelectorOverlay
         IReadOnlySet<string>? baseCharacters = null,
         IReadOnlyDictionary<string, bool>? bootModEnabled = null,
         IReadOnlySet<string>? vanillaBodyEligible = null,
-        List<SkinModScanner.SkippedCustomCharacterMod>? customCharacters = null)
+        List<SkinModScanner.SkippedCustomCharacterMod>? customCharacters = null,
+        IReadOnlySet<string>? vanillaCardsEligible = null)
     {
         _choicesPath = choicesPath;
         _byCharacter = byCharacter;
@@ -129,15 +135,18 @@ public static class SkinSelectorOverlay
         _allMods = allMods ?? new List<UnifiedModItem>();
         _baseCharacters = baseCharacters ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         _vanillaBodyEligible = vanillaBodyEligible ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        _vanillaCardsEligible = vanillaCardsEligible ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         _customCharacters = customCharacters ?? new List<SkinModScanner.SkippedCustomCharacterMod>();
 
         var initial = SkinChoicesConfig.LoadOrEmpty(_choicesPath);
         _pendingCardPacks = ClonePacks(initial.CardPacks);
         _pendingMixedAddons = ClonePacks(initial.MixedAddons);
         _pendingVanillaBody = new HashSet<string>(initial.VanillaBodyMods, StringComparer.OrdinalIgnoreCase);
+        _pendingVanillaCards = new HashSet<string>(initial.VanillaCardsMods, StringComparer.OrdinalIgnoreCase);
         _bootSnapshotCardPacks = ClonePacks(initial.CardPacks);
         _bootSnapshotMixedAddons = ClonePacks(initial.MixedAddons);
         _bootSnapshotVanillaBody = new HashSet<string>(initial.VanillaBodyMods, StringComparer.OrdinalIgnoreCase);
+        _bootSnapshotVanillaCards = new HashSet<string>(initial.VanillaCardsMods, StringComparer.OrdinalIgnoreCase);
         _bootSnapshotActive.Clear();
         foreach (var kv in initial.Characters) _bootSnapshotActive[kv.Key] = kv.Value.Active ?? "default";
         _bootSnapshotDllAssignments.Clear();
@@ -1394,7 +1403,10 @@ public static class SkinSelectorOverlay
                 var bodyTag = _vanillaBodyEligible.Contains(id)
                     ? $"  (🧍 {Strings.Get(_bootSnapshotVanillaBody.Contains(id) ? "vanilla_body_on" : "vanilla_body_off")})"
                     : "";
-                Add($"   {AliasService.Resolve(id, aliases)}{bodyTag}", AppliedLineKind.Normal);
+                var cardsTag = _vanillaCardsEligible.Contains(id)
+                    ? $"  (🃏 {Strings.Get(_bootSnapshotVanillaCards.Contains(id) ? "vanilla_cards_on" : "vanilla_cards_off")})"
+                    : "";
+                Add($"   {AliasService.Resolve(id, aliases)}{bodyTag}{cardsTag}", AppliedLineKind.Normal);
             }
         }
 
@@ -1875,6 +1887,24 @@ public static class SkinSelectorOverlay
             // Added to the name column (beneath the name) further down, not inline in the main row.
         }
 
+        // Mirror toggle: "Vanilla cards / Mod cards" — only for mixed mods that bundle revertible card
+        // art (raye-style). on = revert this mod's card art to stock; off = keep the mod's cards.
+        // Independent of the body toggle; either way the mod's pck stays mounted (its body is kept).
+        string VcText(bool on) => $"🃏 {Strings.Get(on ? "vanilla_cards_on" : "vanilla_cards_off")}";
+        Button? vcToggle = null;
+        if (_vanillaCardsEligible.Contains(modId))
+        {
+            var vcActive = _pendingVanillaCards.Contains(modId);
+            vcToggle = new Button
+            {
+                Text = VcText(vcActive),
+                ToggleMode = true,
+                ButtonPressed = vcActive,
+                CustomMinimumSize = new Vector2(96, 32),
+                TooltipText = Strings.Get("mixed_vanilla_cards_tooltip"),
+            };
+        }
+
         var status = new Label
         {
             CustomMinimumSize = new Vector2(28, 32),
@@ -1918,6 +1948,7 @@ public static class SkinSelectorOverlay
         nameCol.AddChild(label);
         nameCol.AddChild(aliasEdit);
         if (vbToggle != null) nameCol.AddChild(vbToggle);
+        if (vcToggle != null) nameCol.AddChild(vcToggle);
         hbox.AddChild(new Control { CustomMinimumSize = new Vector2(12, 0) }); // gap between order number and name
         hbox.AddChild(nameCol);
 
@@ -1983,6 +2014,12 @@ public static class SkinSelectorOverlay
                 vb.Disabled = !isOn;
                 vb.Modulate = isOn ? Colors.White : new Color(0.4f, 0.4f, 0.4f);
             }
+            // Same for the card toggle — the mod's pck must be mounted for the body to be kept.
+            if (vcToggle is { } vc)
+            {
+                vc.Disabled = !isOn;
+                vc.Modulate = isOn ? Colors.White : new Color(0.4f, 0.4f, 0.4f);
+            }
         }
         ApplyVisual(enabled);
 
@@ -1997,6 +2034,13 @@ public static class SkinSelectorOverlay
             {
                 OnVanillaBodyToggle(modId, isOn);
                 vbTog.Text = VbText(isOn);
+            };
+
+        if (vcToggle is { } vcTog)
+            vcTog.Toggled += isOn =>
+            {
+                OnVanillaCardsToggle(modId, isOn);
+                vcTog.Text = VcText(isOn);
             };
 
         var upBtn = new Button { Text = "↑", CustomMinimumSize = new Vector2(32, 32), Disabled = index == 0 };
@@ -2043,6 +2087,19 @@ public static class SkinSelectorOverlay
             UpdateCardPackHeader();
         }
         catch (Exception ex) { MainFile.Logger.Warn($"vanilla-body toggle error: {ex.Message}"); }
+    }
+
+    private static void OnVanillaCardsToggle(string modId, bool isOn)
+    {
+        try
+        {
+            if (isOn) _pendingVanillaCards.Add(modId);
+            else _pendingVanillaCards.Remove(modId);
+            MainFile.Logger.Info($"vanilla-cards pending toggle: {modId} → {isOn}");
+            UpdateMixedHeader();
+            UpdateCardPackHeader();
+        }
+        catch (Exception ex) { MainFile.Logger.Warn($"vanilla-cards toggle error: {ex.Message}"); }
     }
 
     private static void MoveMixedAddon(string modId, int delta)
@@ -2099,6 +2156,7 @@ public static class SkinSelectorOverlay
             if (_pendingCardPacks != null) choices.CardPacks = ClonePacks(_pendingCardPacks);
             if (_pendingMixedAddons != null) choices.MixedAddons = ClonePacks(_pendingMixedAddons);
             choices.VanillaBodyMods = new HashSet<string>(_pendingVanillaBody, StringComparer.OrdinalIgnoreCase);
+            choices.VanillaCardsMods = new HashSet<string>(_pendingVanillaCards, StringComparer.OrdinalIgnoreCase);
 
             // Apply All Mods reclassifications. Action sentinel encodes target:
             //   "auto"        → clear overrides; scanner re-classifies on next boot
@@ -2189,6 +2247,7 @@ public static class SkinSelectorOverlay
             _pendingCardPacks = ClonePacks(_bootSnapshotCardPacks);
             if (_bootSnapshotMixedAddons != null) _pendingMixedAddons = ClonePacks(_bootSnapshotMixedAddons);
             _pendingVanillaBody = new HashSet<string>(_bootSnapshotVanillaBody, StringComparer.OrdinalIgnoreCase);
+            _pendingVanillaCards = new HashSet<string>(_bootSnapshotVanillaCards, StringComparer.OrdinalIgnoreCase);
 
             var choices = SkinChoicesConfig.LoadOrEmpty(_choicesPath);
             foreach (var kv in _bootSnapshotActive)
@@ -2198,6 +2257,7 @@ public static class SkinSelectorOverlay
             choices.CardPacks = ClonePacks(_bootSnapshotCardPacks);
             if (_bootSnapshotMixedAddons != null) choices.MixedAddons = ClonePacks(_bootSnapshotMixedAddons);
             choices.VanillaBodyMods = new HashSet<string>(_bootSnapshotVanillaBody, StringComparer.OrdinalIgnoreCase);
+            choices.VanillaCardsMods = new HashSet<string>(_bootSnapshotVanillaCards, StringComparer.OrdinalIgnoreCase);
             choices.Save(_choicesPath);
 
             // Restore settings.save card-pack state too so the next launch matches boot.
@@ -2251,6 +2311,7 @@ public static class SkinSelectorOverlay
         }
 
         if (!_pendingVanillaBody.SetEquals(_bootSnapshotVanillaBody)) return true;
+        if (!_pendingVanillaCards.SetEquals(_bootSnapshotVanillaCards)) return true;
 
         var disk = SkinChoicesConfig.LoadOrEmpty(_choicesPath);
         foreach (var (character, choice) in disk.Characters)

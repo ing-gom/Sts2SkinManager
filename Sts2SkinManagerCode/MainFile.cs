@@ -39,6 +39,26 @@ public partial class MainFile : Node
         Logger.Info("Harmony patches applied.");
     }
 
+    // Given a workshop mod folder STS2 resolved via Steam
+    // (…/workshop/content/<appId>/<itemId>[/sub…]), climb to the "content/<appId>" directory so the
+    // scanner treats each <itemId> as a mod folder — matching how the local mods/ root is walked.
+    // Returns null if <appId> is not an ancestor segment (unexpected layout → skip, don't guess).
+    private static string? WorkshopContentRoot(string modFolder, string appId)
+    {
+        try
+        {
+            var dir = new DirectoryInfo(modFolder);
+            while (dir?.Parent != null)
+            {
+                if (string.Equals(dir.Parent.Name, appId, StringComparison.Ordinal))
+                    return dir.Parent.FullName;
+                dir = dir.Parent;
+            }
+        }
+        catch { }
+        return null;
+    }
+
     private static void Run()
     {
         var executablePath = OS.GetExecutablePath();
@@ -61,18 +81,45 @@ public partial class MainFile : Node
         // (steamapps/common/<game> → ../../workshop/content/<appId>) is robust with no Steam binding.
         // Safe to read from Steam's managed folder: SkinManager never mutates scanned mod folders —
         // mounting is in-memory via the LoadResourcePack intercept (see ManagedPckRegistry).
+        const string steamWorkshopAppId = "2868840"; // Slay the Spire 2
         var modRoots = new List<string> { modsDir };
+
+        // Primary, OS-agnostic source: STS2's own ModManager already resolved every subscribed
+        // workshop mod's install folder via the Steam API (SteamUGC.GetItemInstallInfo → an ABSOLUTE
+        // path). We read those back and climb to the shared "content/<appId>" root so the scanner
+        // sees each <itemId> as a mod folder — exactly like the local mods/ root. By the time this
+        // mod's initializer runs, ModManager has finished reading all mods (local + steam) but not
+        // yet finished loading them, so ModManager.Mods is fully populated here.
+        var workshopRoots = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         try
         {
-            const string steamWorkshopAppId = "2868840"; // Slay the Spire 2
-            var workshopDir = Path.GetFullPath(Path.Combine(gameDir, "..", "..", "workshop", "content", steamWorkshopAppId));
-            if (Directory.Exists(workshopDir) && !string.Equals(workshopDir, Path.GetFullPath(modsDir), StringComparison.OrdinalIgnoreCase))
+            foreach (var mod in ModManager.Mods)
             {
-                modRoots.Add(workshopDir);
-                Logger.Info($"steam workshop mods root: {workshopDir}");
+                if (mod == null || mod.modSource != ModSource.SteamWorkshop) continue;
+                var root = WorkshopContentRoot(mod.path, steamWorkshopAppId);
+                if (root != null) workshopRoots.Add(root);
             }
         }
+        catch (Exception ex) { Logger.Warn($"could not read workshop roots from ModManager: {ex.Message}"); }
+
+        // Fallback: relative derivation from the executable. This only holds on Windows/Linux, where
+        // the executable lives directly in steamapps/common/<game>/. On macOS the executable is
+        // buried in <game>.app/Contents/MacOS/, so ".." twice lands inside the .app bundle — which is
+        // the bug this replaces. Kept only to cover the case where ModManager yielded nothing (e.g.
+        // Steam not initialised, or a manual copy of workshop content).
+        try
+        {
+            var derived = Path.GetFullPath(Path.Combine(gameDir, "..", "..", "workshop", "content", steamWorkshopAppId));
+            if (Directory.Exists(derived)) workshopRoots.Add(derived);
+        }
         catch (Exception ex) { Logger.Warn($"could not resolve steam workshop mods root: {ex.Message}"); }
+
+        foreach (var root in workshopRoots)
+        {
+            if (string.Equals(root, Path.GetFullPath(modsDir), StringComparison.OrdinalIgnoreCase)) continue;
+            modRoots.Add(root);
+            Logger.Info($"steam workshop mods root: {root}");
+        }
 
         var baseCharacters = SkinModScanner.ScanBaseCharacters(gameDir);
         Logger.Info($"base character roster ({baseCharacters.Count}): [{string.Join(", ", baseCharacters.OrderBy(x => x))}]");
@@ -230,6 +277,56 @@ public partial class MainFile : Node
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
         choices.VanillaBodyMods.RemoveWhere(id => !vanillaBodyEligible.Contains(id));
 
+        // Mirror axis: mixed mods that bundle revertible card art (e.g. raye) can use the
+        // "Vanilla cards / Mod cards" toggle — keep the mod's body but revert its card art to stock.
+        var vanillaCardsEligible = mixedMods
+            .Where(m => VanillaCardsOverlayBuilder.HasRevertibleCards(m.PckPath))
+            .Select(m => m.ModId)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        choices.VanillaCardsMods.RemoveWhere(id => !vanillaCardsEligible.Contains(id));
+        Logger.Info($"toggle eligibility → mixed=[{string.Join(", ", mixedMods.Select(m => m.ModId))}] " +
+                    $"vanillaBodyEligible=[{string.Join(", ", vanillaBodyEligible)}] " +
+                    $"vanillaCardsEligible=[{string.Join(", ", vanillaCardsEligible)}]");
+
+        // Drive the Harmony-level card revert (Patches.CardVanillaPortraitPatch). Map each flagged
+        // mixed mod to the character pool(s) it reskins, so the getter prefix forces stock art for
+        // those pools — this is what actually beats RitsuLib/ATA (a pck overlay can't; the framework
+        // resolves the portrait path above the resource filesystem). Keyed by pool title (character).
+        var vanillaCardPools = mixedMods
+            .Where(m => choices.VanillaCardsMods.Contains(m.ModId))
+            .SelectMany(m => m.Characters)
+            .Select(c => c.ToLowerInvariant())
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        Patches.CardVanillaPortraitPatch.SetVanillaPools(vanillaCardPools);
+        if (vanillaCardPools.Count > 0)
+            Logger.Info($"vanilla-cards (Harmony): forcing stock card art for pool(s) [{string.Join(", ", vanillaCardPools)}]");
+
+        // Mod-cards (opposite axis): a direct-override mixed mod (raye-style) ships its card art as a
+        // ".tres.remap" into the card atlas, which Godot ignores for a late-mounted pack, so the card
+        // stays vanilla even though the mod is selected. But it ALSO ships the packed portrait png as a
+        // direct ctex byte-override (the same mechanism that makes its BODY work). For each such mod
+        // that is mounted (dropdown pick or enabled mixed addon) and NOT reverted to vanilla, redirect
+        // its cards' PortraitPath to that packed png so the override wins. Keyed "{pool}/{entry}".
+        bool IsMounted(DetectedSkinMod m)
+        {
+            if (choices.MixedAddons.Enabled.TryGetValue(m.ModId, out var en) && en) return true;
+            foreach (var c in m.Characters)
+                if (choices.Characters.TryGetValue(c, out var ch)
+                    && string.Equals(ch.Active, m.ModId, StringComparison.OrdinalIgnoreCase))
+                    return true;
+            return false;
+        }
+        var modCardKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var m in mixedMods)
+        {
+            if (choices.VanillaCardsMods.Contains(m.ModId) || !IsMounted(m)) continue;
+            foreach (var k in VanillaCardsOverlayBuilder.CollectPackedPortraitCardKeys(m.PckPath))
+                modCardKeys.Add(k);
+        }
+        Patches.CardVanillaPortraitPatch.SetModCardKeys(modCardKeys);
+        if (modCardKeys.Count > 0)
+            Logger.Info($"mod-cards (Harmony): surfacing {modCardKeys.Count} direct-override card(s) via packed portrait [{string.Join(", ", modCardKeys.Take(12))}{(modCardKeys.Count > 12 ? ", …" : "")}]");
+
         choices.Save(choicesPath);
         Logger.Info($"skin_choices.json → {choicesPath}");
         Logger.Info($"card pack state: ordering=[{string.Join(", ", choices.CardPacks.Ordering)}], enabled={{ {string.Join(", ", choices.CardPacks.Enabled.Select(kv => $"{kv.Key}={kv.Value}"))} }}");
@@ -287,6 +384,9 @@ public partial class MainFile : Node
         // Vanilla-body mods keep their DLL loaded so their custom cards stay; the body is reverted
         // by the overlay mounted below, not by blocking the DLL.
         foreach (var modId in choices.VanillaBodyMods) keepDllModIds.Add(modId);
+        // Vanilla-cards mods keep their DLL/pck loaded so their body stays; the card art is reverted
+        // by a card overlay mounted below.
+        foreach (var modId in choices.VanillaCardsMods) keepDllModIds.Add(modId);
         foreach (var d in characterMods)
         {
             if (!keepDllModIds.Contains(d.ModId))
@@ -343,7 +443,7 @@ public partial class MainFile : Node
             ? Sts2SettingsWriter.ReadModEnabledState(settings)
             : new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
 
-        SkinSelectorOverlay.Configure(choicesPath, byCharacter, cardMods, mixedMods, allMods, baseCharacters, bootModEnabled, vanillaBodyEligible, skippedCustom);
+        SkinSelectorOverlay.Configure(choicesPath, byCharacter, cardMods, mixedMods, allMods, baseCharacters, bootModEnabled, vanillaBodyEligible, skippedCustom, vanillaCardsEligible);
         SkinSelectorOverlay.SetWatcher(_watcher);
 
         // Defer ModConfig registration so the framework's own Initialize can run first.
@@ -375,6 +475,12 @@ public partial class MainFile : Node
                     }
                 };
             }
+
+            // "Vanilla cards" is handled at the Harmony layer (Patches.CardVanillaPortraitPatch,
+            // wired via SetVanillaPools above), NOT by a pck overlay: card-art frameworks (RitsuLib/
+            // ATA) resolve the portrait path with their own prefix above the resource filesystem, so a
+            // mounted base-game overlay never wins. Forcing the stock PortraitPath in a higher-priority
+            // prefix is what actually reverts the art. (No deferred mount needed here.)
 
             // After all other mods finish their Harmony patches, sweep for DLL-driven character
             // skins (Hcxmmx_King_Skin pattern) — mods whose pck has no standard skin paths but
