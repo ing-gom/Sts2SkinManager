@@ -16,13 +16,19 @@ public static class AssetDomainCatalog
         RegexOptions.IgnoreCase | RegexOptions.Compiled
     );
 
-    // Any reference to the base-game card class namespace anywhere in the pck — either as an
-    // asset path (`card_art/MegaCrit.Sts2.Core.Models.Cards.X_card_art.png` — RegentCardsAnimeRework,
-    // `assets/images/cards/MegaCrit.Sts2.Core.Models.Cards.X_portrait.png` — TheDefectCardArtMod)
-    // or as a `cardId` reference in an embedded scene/JSON. The namespace itself is specific enough
-    // to base-game cards that any pck mentioning it is overriding card visuals.
+    // Card art named after the base-game card class — `card_art/MegaCrit.Sts2.Core.Models.Cards.X_card_art.png`
+    // (RegentCardsAnimeRework), `assets/images/cards/MegaCrit.Sts2.Core.Models.Cards.X_portrait.png`
+    // (TheDefectCardArtMod).
+    //
+    // The `_card_art`/`_portrait` suffix is REQUIRED, not decoration: the bare namespace also appears
+    // in the IL metadata of any pck that embeds a DLL referencing base card types, which has nothing
+    // to do with card visuals. SlayTheUniverse (a content mod) carries 681 bare occurrences — strings
+    // like `MegaCrit.Sts2.Core.Models.Cards.Mocks` and `...Abrasive+<OnPlay>d__7` — and the unanchored
+    // form classified it as a card mod, surfacing it in the Cards panel where the user could reorder
+    // or disable it to no effect. Requiring the suffix drops it to 0 hits while keeping the real card
+    // packs (AliceDefectCard 736, RegentCardsAnimeRework 300).
     public static readonly Regex CardArtBaseRegex = new(
-        @"MegaCrit\.Sts2\.Core\.Models\.Cards\.",
+        @"MegaCrit\.Sts2\.Core\.Models\.Cards\.\w+_(?:card_art|portrait)",
         RegexOptions.IgnoreCase | RegexOptions.Compiled
     );
 
@@ -36,6 +42,43 @@ public static class AssetDomainCatalog
         @"/card_portraits/",
         RegexOptions.IgnoreCase | RegexOptions.Compiled
     );
+
+    // Root segment of any card-art resource path: `res://{root}/.../card_portraits/`,
+    // `res://{root}/.../card_art/`, `res://{root}/.../{name}cards{name}.sprites/`.
+    // The root is what decides whether the Cards panel's priority order can do anything at all —
+    // see CardOverrideMode.
+    private static readonly Regex CardPathRootRegex = new(
+        @"res://([^/""]+)/(?:[^/""]+/)*(?:card_portraits/|card_art/|[^/""]*card[^/""]*\.sprites/)",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled
+    );
+
+    // How a card pack gets its art in front of the player — and therefore whether reordering it in
+    // the Cards panel does anything.
+    //
+    //   SharedPath  `res://images/packed/card_portraits/ironclad/break.png` (base-owned) or
+    //               `res://generated/assets/card_art/...` (shared tooling convention).
+    //               Two packs that reskin the same card write the SAME resource path, so they
+    //               genuinely collide and Godot's last-mount-wins picks the winner. mod_list order
+    //               — which is exactly what the panel's priority controls — decides. Priority WORKS.
+    //
+    //   ModPrivate  `res://ATA_IronClad/images/card_portraits/ironclad/break.png`.
+    //               Every pack's art sits at its own distinct path, so nothing collides and there is
+    //               nothing for mount order to arbitrate. A Harmony DLL picks what
+    //               CardModel.PortraitPath returns (RitsuLib resolves competing packs by its own
+    //               registration-order registry, ATA via its own patch). Mount order cannot reach
+    //               that decision, so priority is INERT — reordering these rows changes nothing.
+    //
+    // Verified against every installed pack: images/generated roots for AncientWaifus, Ryoshu, raye,
+    // AliceDefectCard, RegentCardsAnimeRework; own-id roots for ATA_IronClad, ATA_Silent, FGOCore,
+    // ArtoriaCaster.
+    public enum CardOverrideMode { None, SharedPath, ModPrivate, Mixed }
+
+    // A pack cannot collide with anything when it files its art under its own mod id — that root is
+    // unique to it by construction. Any other root (`images`, `generated`, `.godot`) is one other
+    // packs also write to, so treat it as shared. Comparing against the pck's own id keeps this
+    // framework-agnostic: it reads where the mod puts its files, not which library it links.
+    private static bool IsPrivateRoot(string root, string? ownNamespace) =>
+        ownNamespace != null && string.Equals(root, ownNamespace, StringComparison.OrdinalIgnoreCase);
 
     // Strong signals that a mod adds a brand-new character via the BaseLib framework rather than
     // skinning an existing one. Any single hit is enough — these strings shouldn't appear in
@@ -117,7 +160,9 @@ public static class AssetDomainCatalog
         int CustomCharacterIndicatorHits,
         int CharSelectAssetHits,
         int EventArtHits,
-        IReadOnlySet<string> CharSelectIds)
+        IReadOnlySet<string> CharSelectIds,
+        int SharedCardPathHits = 0,
+        int ModPrivateCardPathHits = 0)
     {
         public bool HasCardArt => CardArtHits > 0;
         public bool HasCardPortraits => CardPortraitsHits > 0;
@@ -125,6 +170,17 @@ public static class AssetDomainCatalog
         public bool IsCustomCharacterMod => CustomCharacterIndicatorHits > 0;
         public bool HasCharSelectAsset => CharSelectAssetHits > 0;
         public bool IsEventArtMod => EventArtHits > 0;
+
+        // Mixed means the pack writes some art to a shared path and some to its own namespace, so
+        // priority moves part of its art and not the rest. Reported honestly rather than rounded to
+        // one of the two — a half-working slider is exactly the case users report as "sometimes it
+        // does nothing". Falls back to SharedPath when a card mod matched only via CardArtBaseRegex
+        // with no parseable root, which is the pre-existing last-mount-wins assumption.
+        public CardOverrideMode CardOverrideMode =>
+            !IsCardMod ? CardOverrideMode.None
+            : SharedCardPathHits > 0 && ModPrivateCardPathHits > 0 ? CardOverrideMode.Mixed
+            : ModPrivateCardPathHits > 0 ? CardOverrideMode.ModPrivate
+            : CardOverrideMode.SharedPath;
 
         // Compact one-line summary for boot log — only non-zero domains appear, so the line
         // stays short for mods that only touch one or two categories.
@@ -135,6 +191,9 @@ public static class AssetDomainCatalog
             if (CharSelectAssetHits > 0) parts.Add($"char_select:{CharSelectAssetHits}");
             if (CardArtHits > 0) parts.Add($"card_art:{CardArtHits}");
             if (CardPortraitsHits > 0) parts.Add($"card_portraits:{CardPortraitsHits}");
+            // Surfaced in the boot log so a "priority does nothing" report can be triaged from the
+            // user's log alone, without needing their pcks.
+            if (IsCardMod) parts.Add($"card_mode:{CardOverrideMode}");
             if (EventArtHits > 0) parts.Add($"event_art:{EventArtHits}");
             if (CustomCharacterIndicatorHits > 0) parts.Add($"custom_char:{CustomCharacterIndicatorHits}");
             return parts.Count == 0 ? "(no recognized domain)" : string.Join(" ", parts);
@@ -144,14 +203,24 @@ public static class AssetDomainCatalog
     // Walks `paths` once and returns hit counts per domain plus character ids extracted from
     // the spine domain. Caller decides how to use the result (SkinModScanner classifies;
     // UnclassifiedModInventory just counts).
-    public static PathScan ScanPaths(IEnumerable<string> paths)
+    //
+    // `ownNamespace` is the pck's own mod id. Pass it to get a meaningful CardOverrideMode —
+    // without it every card path reads as shared, since a root can only be recognised as private by
+    // comparing it against the id that owns it. Optional so counting-only callers can skip it.
+    public static PathScan ScanPaths(IEnumerable<string> paths, string? ownNamespace = null)
     {
         var chars = new HashSet<string>();
         var charSelectIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         int spineHits = 0, cardArtHits = 0, cardPortraitsHits = 0, customCharHits = 0, charSelectHits = 0, eventArtHits = 0;
+        int sharedCardHits = 0, privateCardHits = 0;
 
         foreach (var p in paths)
         {
+            foreach (Match rm in CardPathRootRegex.Matches(p))
+            {
+                if (IsPrivateRoot(rm.Groups[1].Value, ownNamespace)) privateCardHits++;
+                else sharedCardHits++;
+            }
             var m = CharacterSpineRegex.Match(p);
             if (m.Success)
             {
@@ -172,6 +241,6 @@ public static class AssetDomainCatalog
             }
         }
 
-        return new PathScan(chars, spineHits, cardArtHits, cardPortraitsHits, customCharHits, charSelectHits, eventArtHits, charSelectIds);
+        return new PathScan(chars, spineHits, cardArtHits, cardPortraitsHits, customCharHits, charSelectHits, eventArtHits, charSelectIds, sharedCardHits, privateCardHits);
     }
 }

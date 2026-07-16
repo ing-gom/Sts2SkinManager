@@ -996,6 +996,14 @@ public static class SkinSelectorOverlay
         };
         hbox.AddChild(status);
 
+        // Packs that serve card art from their own namespace via a DLL don't collide with anything,
+        // so mod_list order — all this panel's priority controls — can't pick a winner between them.
+        // Show the number greyed out rather than hiding it: the row still has a stable position, but
+        // the user shouldn't read that number as a lever it isn't.
+        var mode = _cardMods.FirstOrDefault(m => string.Equals(m.ModId, modId, StringComparison.OrdinalIgnoreCase))
+            ?.CardOverrideMode ?? AssetDomainCatalog.CardOverrideMode.None;
+        var priorityInert = mode == AssetDomainCatalog.CardOverrideMode.ModPrivate;
+
         var orderLabel = new Label
         {
             Text = $"{index + 1}",
@@ -1003,7 +1011,27 @@ public static class SkinSelectorOverlay
             VerticalAlignment = VerticalAlignment.Center,
             HorizontalAlignment = HorizontalAlignment.Right,
         };
+        if (priorityInert) orderLabel.Modulate = new Color(0.5f, 0.5f, 0.5f);
         hbox.AddChild(orderLabel);
+
+        if (mode is AssetDomainCatalog.CardOverrideMode.ModPrivate or AssetDomainCatalog.CardOverrideMode.Mixed)
+        {
+            hbox.AddChild(new Label
+            {
+                Text = priorityInert ? "⚠" : "◐",
+                CustomMinimumSize = new Vector2(20, 32),
+                VerticalAlignment = VerticalAlignment.Center,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                MouseFilter = Control.MouseFilterEnum.Stop,
+                TooltipText = Strings.Get(priorityInert ? "card_priority_inert_tooltip" : "card_priority_partial_tooltip"),
+                Modulate = priorityInert ? new Color(0.95f, 0.7f, 0.3f) : new Color(0.75f, 0.75f, 0.5f),
+            });
+        }
+        else
+        {
+            hbox.AddChild(new Control { CustomMinimumSize = new Vector2(20, 0) }); // keep names aligned across rows
+        }
+
         hbox.AddChild(new Control { CustomMinimumSize = new Vector2(12, 0) }); // gap between order number and name
 
         var aliases = LoadAliases();

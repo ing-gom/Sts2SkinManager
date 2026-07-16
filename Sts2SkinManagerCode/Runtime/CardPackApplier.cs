@@ -43,11 +43,19 @@ public static class CardPackApplier
         var nonCardEntries = entries.Where(e => !orderedSet.Contains(e["id"]?.GetValue<string>() ?? "")).ToList();
         // Top of UI list = highest priority = mounted LAST = goes to END of mod_list.
         // mod_list iterates in order, so reverse the UI ordering when writing.
+        //
+        // A pack the game has never written into mod_list (freshly installed — the game only
+        // rebuilds mod_list at the END of ModManager.Initialize, one boot behind) must be
+        // MATERIALIZED here, not skipped. SortModList scores anything absent from mod_list at
+        // 999999999, which sorts it past every listed mod → mounts last → wins every conflict.
+        // Skipping it therefore inverted the panel: SyncCardPacks appends new packs at the UI
+        // bottom labelled lowest priority, while they silently outranked everything on disk.
         var orderedCardEntries = orderedIds
             .AsEnumerable()
             .Reverse()
-            .Where(id => byModId.ContainsKey(id))
-            .Select(id => byModId[id])
+            .Select(id => byModId.TryGetValue(id, out var existing) ? existing : CreateModListEntry(id, packs, detectedCardMods))
+            .Where(e => e != null)
+            .Select(e => e!)
             .ToList();
 
         var newList = new List<JsonNode>(nonCardEntries);
@@ -76,6 +84,44 @@ public static class CardPackApplier
         }
 
         return changed;
+    }
+
+    // Builds the mod_list entry the game itself would have written for a pack it hasn't listed yet:
+    // {id, source, is_enabled}. Returns null for an id with no installed pck — SyncCardPacks already
+    // drops those from Ordering, so reaching here means there's nothing real to order.
+    //
+    // `source` is load-bearing, not cosmetic: ModSettings.IsModDisabled matches on
+    // (Id, Source, IsEnabled), so an entry carrying the wrong source makes the row's checkbox
+    // silently do nothing. Take it from ModManager.Mods, which is authoritative for this session.
+    private static JsonNode? CreateModListEntry(string modId, CardPacksConfig packs, List<DetectedSkinMod> detectedCardMods)
+    {
+        var detected = detectedCardMods.FirstOrDefault(m => string.Equals(m.ModId, modId, StringComparison.OrdinalIgnoreCase));
+        if (detected == null) return null;
+
+        return new JsonObject
+        {
+            ["id"] = modId,
+            ["source"] = ResolveModSource(modId, detected),
+            ["is_enabled"] = packs.Enabled.TryGetValue(modId, out var want) ? want : true,
+        };
+    }
+
+    private static string ResolveModSource(string modId, DetectedSkinMod detected)
+    {
+        try
+        {
+            foreach (var mod in ModManager.Mods)
+            {
+                if (mod?.manifest?.id == null) continue;
+                if (!string.Equals(mod.manifest.id, modId, StringComparison.OrdinalIgnoreCase)) continue;
+                return mod.modSource == ModSource.SteamWorkshop ? "steam_workshop" : "mods_directory";
+            }
+        }
+        catch { }
+        // Mod isn't loaded this session (or ModManager isn't up yet): fall back to where the pck sits.
+        return detected.PckPath.Replace('\\', '/').Contains("/workshop/content/", StringComparison.OrdinalIgnoreCase)
+            ? "steam_workshop"
+            : "mods_directory";
     }
 
     public static bool ApplyToMemoryModList(CardPacksConfig packs)

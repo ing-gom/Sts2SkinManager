@@ -4,6 +4,28 @@ All notable changes to Sts2SkinManager are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.26.0] - 2026-07-16
+
+### Added — Cards panel now says which rows the priority order can actually control
+- A user reported that reordering card packs did nothing: four packs installed, some overlapping on the same card art, and "sometimes adjusting the priority in any order doesn't seem to affect anything". They were right, and it was not a bug in the ordering code — **priority is structurally inert for a whole class of card pack**, and the panel gave no hint of it.
+- Card packs get their art in front of the player in one of two ways, and only one of them can be arbitrated by load order:
+  - **Shared path** — the pack writes to a path other packs also write to (`res://images/packed/card_portraits/…` owned by the base game, or the shared `res://generated/assets/card_art/…` tooling convention). Two packs reskinning the same card land on the *same* resource path, so they genuinely collide and Godot's last-mount-wins picks the winner. mod_list order — exactly what this panel controls — decides. **Priority works.**
+  - **Mod-private** — the pack keeps its art under its own namespace (`res://ATA_IronClad/images/card_portraits/…`) and injects it with a Harmony DLL. Nothing collides: every pack's art sits at its own distinct path, and the DLL decides what `CardModel.PortraitPath` returns. Mount order cannot reach that decision, so **priority is inert** — the arrows move the row and change nothing.
+- Mod-private rows are now marked **⚠** with a greyed-out priority number and a tooltip explaining that ordering does not apply and to use the checkbox instead; packs that are half-and-half are marked **◐**. Localized in all 16 languages. The boot log gains a `card_mode:` field per pack so a "priority does nothing" report can be triaged from the log alone.
+- Detection is by the **root segment of the card-art path** compared against the pack's own mod id: a pack that files its art under its own id cannot collide with anything, by construction. This reads where the mod puts its files rather than which framework it links, so it needs no per-framework knowledge.
+
+### Fixed — a freshly installed card pack silently outranked every other pack
+- `CardPackApplier` only rewrote mod_list entries the game had already written, skipping any pack absent from the list. But the game rebuilds mod_list at the *end* of `ModManager.Initialize`, one boot behind — and `SortModList` scores anything missing from mod_list at `999999999`, sorting it past every listed mod, so it mounts **last and wins every conflict**. Meanwhile `SyncCardPacks` appends newly detected packs at the *bottom* of the panel labelled lowest priority. The UI and reality were inverted until the next restart. Such packs are now materialized into mod_list at their correct position instead of being skipped.
+- The synthesized entry carries the mod's real `source` (read from `ModManager.Mods`, falling back to the pck's location). This is load-bearing, not cosmetic: `ModSettings.IsModDisabled` matches on `(Id, Source, IsEnabled)`, so an entry with the wrong source would make the row's checkbox silently do nothing.
+
+### Fixed — content mods with an embedded DLL were mis-listed as card packs
+- The base-card-namespace pattern matched `MegaCrit.Sts2.Core.Models.Cards.` anywhere in a pck, but that string also appears in the **IL metadata** of any pck embedding a DLL that references base card types — nothing to do with card visuals. SlayTheUniverse (a content mod) carried 681 such strings (`…Cards.Mocks`, `…Cards.Abrasive+<OnPlay>d__7`) and was surfaced in the Cards panel, where reordering or disabling it could only confuse. The pattern now requires the `_card_art` / `_portrait` suffix that a real asset path has, dropping it to 0 hits while keeping the genuine packs (AliceDefectCard 736, RegentCardsAnimeRework 300).
+
+### Verification
+- Classification checked against every installed pack, using the shipped regexes: shared-path for `AliceDefectCard`, `RegentCardsAnimeRework` (root `generated`) and `AncientWaifus`, `Ryoshu`, `raye` (root `images`); mod-private for `FGOCore`, `ArtoriaCaster`, `ATA_IronClad`, `ATA_Silent` (root = own mod id). 9/9 as designed; SlayTheUniverse correctly drops out.
+- The resolution rules were read from the decompiled sources rather than inferred: RitsuLib merges competing packs by a registration-order `WriteOrder` counter (per-character scope beats global regardless of order; re-registering re-issues a higher `WriteOrder`), and the game's `SortModList` applies the `999999999` rule above. Confirmed against live files that SkinManager's `settings.save` write is **not** clobbered by the game: `skin_choices` slot 1 (`AliceDefectCard`) correctly lands last in `mod_list` (index 48) and wins.
+- Debug + Release build clean. **This release makes the inert case visible; it does not make ordering work for mod-private packs** — that is not fixable from mount order. A follow-up may drive RitsuLib's registry directly for the RitsuLib-family packs; packs that patch `PortraitPath` with their own Harmony patch have no general fix and remain checkbox-only.
+
 ## [0.25.0] - 2026-07-08
 
 ### Added — "Vanilla cards / Mod cards" toggle for mixed mods (choose the body and the card art independently)

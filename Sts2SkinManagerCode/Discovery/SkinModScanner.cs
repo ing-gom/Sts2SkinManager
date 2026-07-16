@@ -14,7 +14,8 @@ public record DetectedSkinMod(
     IReadOnlyList<string> Characters,
     string? PreviewPath,
     bool IsMixed = false,
-    string? DomainsLabel = null
+    string? DomainsLabel = null,
+    AssetDomainCatalog.CardOverrideMode CardOverrideMode = AssetDomainCatalog.CardOverrideMode.None
 );
 
 public static class SkinModScanner
@@ -87,7 +88,10 @@ public static class SkinModScanner
             var modDir = Path.GetDirectoryName(pck)!;
             var previewPath = FindPreview(modDir);
 
-            var scan = AssetDomainCatalog.ScanPaths(PckPathReader.ReadAsciiRuns(pck));
+            var pckId = Path.GetFileNameWithoutExtension(pck);
+            // pckId doubles as the mod's resource namespace (`res://{pckId}/...`), which is what
+            // lets the scan tell art the pack keeps to itself from art it writes to a shared path.
+            var scan = AssetDomainCatalog.ScanPaths(PckPathReader.ReadAsciiRuns(pck), pckId);
             var chars = scan.Characters;
             var isCardMod = scan.IsCardMod;
             var domainsLabel = scan.ToLabel();
@@ -97,7 +101,6 @@ public static class SkinModScanner
             // skippedCustomCharacterMods (auto-mount) instead of being mis-classified as a base skin.
             var introducesNonBaseChar = CustomCharacterFrameworkDetector.IntroducesNonBaseCharacter(scan.CharSelectIds, baseCharacters);
 
-            var pckId = Path.GetFileNameWithoutExtension(pck);
             // ModId is the pck filename — same name in different subfolders would collide silently.
             // Keep the first occurrence, log + skip duplicates so the user can rename or dedupe.
             if (seenModIds.TryGetValue(pckId, out var firstPath))
@@ -230,7 +233,7 @@ public static class SkinModScanner
                 // priority), but surfaces in the [mixed] log section so the user knows the mod
                 // may visually conflict with a character skin targeting the same base character.
                 var isMixed = scan.HasCharSelectAsset;
-                result.Add(new DetectedSkinMod(pckId, modDir, pck, SkinModKind.Cards, new List<string>(), previewPath, isMixed, domainsLabel));
+                result.Add(new DetectedSkinMod(pckId, modDir, pck, SkinModKind.Cards, new List<string>(), previewPath, isMixed, domainsLabel, scan.CardOverrideMode));
             }
             else if (scan.IsEventArtMod)
             {
