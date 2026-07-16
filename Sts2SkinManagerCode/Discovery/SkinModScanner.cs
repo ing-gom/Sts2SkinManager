@@ -15,7 +15,8 @@ public record DetectedSkinMod(
     string? PreviewPath,
     bool IsMixed = false,
     string? DomainsLabel = null,
-    AssetDomainCatalog.CardOverrideMode CardOverrideMode = AssetDomainCatalog.CardOverrideMode.None
+    AssetDomainCatalog.AssetOverrideMode CardOverrideMode = AssetDomainCatalog.AssetOverrideMode.None,
+    AssetDomainCatalog.AssetOverrideMode SpineOverrideMode = AssetDomainCatalog.AssetOverrideMode.None
 );
 
 public static class SkinModScanner
@@ -152,7 +153,8 @@ public static class SkinModScanner
                     // but the primary classification is Character, with the assigned base char.
                     var isMixed = isCardMod;
                     result.Add(new DetectedSkinMod(pckId, modDir, pck, SkinModKind.Character,
-                        new List<string> { assignedChar.ToLowerInvariant() }, previewPath, IsMixed: isMixed, DomainsLabel: domainsLabel));
+                        new List<string> { assignedChar.ToLowerInvariant() }, previewPath, IsMixed: isMixed, DomainsLabel: domainsLabel,
+                        CardOverrideMode: scan.CardOverrideMode, SpineOverrideMode: scan.SpineOverrideMode));
                     continue;
                 }
                 else
@@ -180,7 +182,7 @@ public static class SkinModScanner
                 // dropdown as main spine) but is also flagged IsMixed so the mixed-addon panel can
                 // toggle it independently as a non-main mount.
                 var isMixed = isCardMod;
-                result.Add(new DetectedSkinMod(pckId, modDir, pck, SkinModKind.Character, baseHits.ToList(), previewPath, isMixed, domainsLabel));
+                result.Add(new DetectedSkinMod(pckId, modDir, pck, SkinModKind.Character, baseHits.ToList(), previewPath, isMixed, domainsLabel, scan.CardOverrideMode, scan.SpineOverrideMode));
             }
             else if (ClymandSaruSkinReader.ResolveTargetCharacter(modDir, pckId) is { } saruChar
                      && (baseCharacters.Count == 0 || baseCharacters.Contains(saruChar)))
@@ -233,7 +235,7 @@ public static class SkinModScanner
                 // priority), but surfaces in the [mixed] log section so the user knows the mod
                 // may visually conflict with a character skin targeting the same base character.
                 var isMixed = scan.HasCharSelectAsset;
-                result.Add(new DetectedSkinMod(pckId, modDir, pck, SkinModKind.Cards, new List<string>(), previewPath, isMixed, domainsLabel, scan.CardOverrideMode));
+                result.Add(new DetectedSkinMod(pckId, modDir, pck, SkinModKind.Cards, new List<string>(), previewPath, isMixed, domainsLabel, scan.CardOverrideMode, scan.SpineOverrideMode));
             }
             else if (scan.IsEventArtMod)
             {

@@ -392,7 +392,11 @@ public static class SkinSelectorOverlay
         _previewCaption = caption;
         container.AddChild(caption);
 
-        container.ZIndex = 1000;
+        // Above the tab panel. The preview, the dropdown row and the panel are all children of
+        // `screen`, and equal ZIndex is broken by tree order — the panel is attached after this, so
+        // at a matching 1000 it drew OVER the preview image. Also clears the drag indicator, which
+        // is ZIndex 2000 relative to a row inside the panel.
+        container.ZIndex = 3100;
         screen.AddChild(container);
         MainFile.Logger.Info("preview panel attached");
     }
@@ -962,6 +966,30 @@ public static class SkinSelectorOverlay
         UpdateCardPackHeader();
     }
 
+    // Badge for a row whose priority order can't fully do what the arrows imply. ModPrivate = the
+    // order is inert (nothing collides on a path, so mount order has no decision to make);
+    // Mixed = it moves some assets and not others. SharedPath/None get a spacer so every row's name
+    // column starts at the same x.
+    private static Control BuildPriorityBadge(AssetDomainCatalog.AssetOverrideMode mode, string inertKey, string partialKey)
+    {
+        if (mode is not (AssetDomainCatalog.AssetOverrideMode.ModPrivate or AssetDomainCatalog.AssetOverrideMode.Mixed))
+            return new Control { CustomMinimumSize = new Vector2(20, 0) };
+
+        var inert = mode == AssetDomainCatalog.AssetOverrideMode.ModPrivate;
+        // WrappedTooltipLabel, not Label: these explanations are full sentences and Godot's stock
+        // tooltip does not wrap.
+        return new WrappedTooltipLabel
+        {
+            Text = inert ? "⚠" : "◐",
+            CustomMinimumSize = new Vector2(20, 32),
+            VerticalAlignment = VerticalAlignment.Center,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            MouseFilter = Control.MouseFilterEnum.Stop,
+            TooltipText = Strings.Get(inert ? inertKey : partialKey),
+            Modulate = inert ? new Color(0.95f, 0.7f, 0.3f) : new Color(0.75f, 0.75f, 0.5f),
+        };
+    }
+
     private static Control BuildCardPackRow(string modId, CardPacksConfig packs, int index, int total)
     {
         var hbox = new CardPackRow
@@ -1001,8 +1029,8 @@ public static class SkinSelectorOverlay
         // Show the number greyed out rather than hiding it: the row still has a stable position, but
         // the user shouldn't read that number as a lever it isn't.
         var mode = _cardMods.FirstOrDefault(m => string.Equals(m.ModId, modId, StringComparison.OrdinalIgnoreCase))
-            ?.CardOverrideMode ?? AssetDomainCatalog.CardOverrideMode.None;
-        var priorityInert = mode == AssetDomainCatalog.CardOverrideMode.ModPrivate;
+            ?.CardOverrideMode ?? AssetDomainCatalog.AssetOverrideMode.None;
+        var priorityInert = mode == AssetDomainCatalog.AssetOverrideMode.ModPrivate;
 
         var orderLabel = new Label
         {
@@ -1014,24 +1042,7 @@ public static class SkinSelectorOverlay
         if (priorityInert) orderLabel.Modulate = new Color(0.5f, 0.5f, 0.5f);
         hbox.AddChild(orderLabel);
 
-        if (mode is AssetDomainCatalog.CardOverrideMode.ModPrivate or AssetDomainCatalog.CardOverrideMode.Mixed)
-        {
-            hbox.AddChild(new Label
-            {
-                Text = priorityInert ? "⚠" : "◐",
-                CustomMinimumSize = new Vector2(20, 32),
-                VerticalAlignment = VerticalAlignment.Center,
-                HorizontalAlignment = HorizontalAlignment.Center,
-                MouseFilter = Control.MouseFilterEnum.Stop,
-                TooltipText = Strings.Get(priorityInert ? "card_priority_inert_tooltip" : "card_priority_partial_tooltip"),
-                Modulate = priorityInert ? new Color(0.95f, 0.7f, 0.3f) : new Color(0.75f, 0.75f, 0.5f),
-            });
-        }
-        else
-        {
-            hbox.AddChild(new Control { CustomMinimumSize = new Vector2(20, 0) }); // keep names aligned across rows
-        }
-
+        hbox.AddChild(BuildPriorityBadge(mode, "card_priority_inert_tooltip", "card_priority_partial_tooltip"));
         hbox.AddChild(new Control { CustomMinimumSize = new Vector2(12, 0) }); // gap between order number and name
 
         var aliases = LoadAliases();
@@ -1606,7 +1617,7 @@ public static class SkinSelectorOverlay
         // independent of SkinManager's dll-block). On = STS2 loads it normally.
         var bootEnabled = _bootSnapshotModEnabled.TryGetValue(item.ModId, out var be) ? be : true;
         var pendingEnabled = _pendingModEnabled.TryGetValue(item.ModId, out var pe) ? pe : bootEnabled;
-        var check = new CheckBox
+        var check = new WrappedTooltipCheckBox
         {
             ButtonPressed = pendingEnabled,
             CustomMinimumSize = new Vector2(32, 32),
@@ -1672,7 +1683,7 @@ public static class SkinSelectorOverlay
         };
 
         var pendingRestore = _pendingAllModsDecisions.TryGetValue(item.ModId, out var act) && act == "skip";
-        var check = new CheckBox
+        var check = new WrappedTooltipCheckBox
         {
             ButtonPressed = pendingRestore,
             CustomMinimumSize = new Vector2(32, 32),
@@ -1767,7 +1778,7 @@ public static class SkinSelectorOverlay
         // won't load the custom character on next launch.
         var bootEnabled = _bootSnapshotModEnabled.TryGetValue(cc.ModId, out var be) ? be : true;
         var pendingEnabled = _pendingModEnabled.TryGetValue(cc.ModId, out var pe) ? pe : bootEnabled;
-        var check = new CheckBox
+        var check = new WrappedTooltipCheckBox
         {
             ButtonPressed = pendingEnabled,
             CustomMinimumSize = new Vector2(32, 32),
@@ -1904,7 +1915,7 @@ public static class SkinSelectorOverlay
         if (_vanillaBodyEligible.Contains(modId))
         {
             var vbActive = _pendingVanillaBody.Contains(modId);
-            vbToggle = new Button
+            vbToggle = new WrappedTooltipButton
             {
                 Text = VbText(vbActive),
                 ToggleMode = true,
@@ -1923,7 +1934,7 @@ public static class SkinSelectorOverlay
         if (_vanillaCardsEligible.Contains(modId))
         {
             var vcActive = _pendingVanillaCards.Contains(modId);
-            vcToggle = new Button
+            vcToggle = new WrappedTooltipButton
             {
                 Text = VcText(vcActive),
                 ToggleMode = true,
@@ -1941,6 +1952,14 @@ public static class SkinSelectorOverlay
         };
         hbox.AddChild(status);
 
+        // This list's order is one pck-mount lever, so it governs the mod's body and cards together —
+        // combine both domains for the row's label. ATA namespaces both, so its order is fully inert;
+        // raye/AncientWaifus keep both on base paths, so theirs works.
+        var mixedMod = _mixedMods.FirstOrDefault(m => string.Equals(m.ModId, modId, StringComparison.OrdinalIgnoreCase));
+        var mixedMode = mixedMod == null
+            ? AssetDomainCatalog.AssetOverrideMode.None
+            : AssetDomainCatalog.Combine(mixedMod.SpineOverrideMode, mixedMod.CardOverrideMode);
+
         var orderLabel = new Label
         {
             Text = $"{index + 1}",
@@ -1948,7 +1967,9 @@ public static class SkinSelectorOverlay
             VerticalAlignment = VerticalAlignment.Center,
             HorizontalAlignment = HorizontalAlignment.Right,
         };
+        if (mixedMode == AssetDomainCatalog.AssetOverrideMode.ModPrivate) orderLabel.Modulate = new Color(0.5f, 0.5f, 0.5f);
         hbox.AddChild(orderLabel);
+        hbox.AddChild(BuildPriorityBadge(mixedMode, "mixed_priority_inert_tooltip", "mixed_priority_partial_tooltip"));
 
         var aliases = LoadAliases();
         var label = new Label

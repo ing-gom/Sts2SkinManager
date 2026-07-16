@@ -4,6 +4,28 @@ All notable changes to Sts2SkinManager are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.27.0] - 2026-07-16
+
+### Fixed — the ⚠ marker never reached the mods that need it
+- v0.26.0 marked card packs whose priority order is inert, but only in the **Cards** panel — and in practice every mod-private pack lives somewhere else. On a real install: `ATA_IronClad` and `ATA_Silent` are mixed mods (they ship a spine, so they route to the **Mixed** panel), and `FGOCore` / `ArtoriaCaster` are custom-character mods that are deliberately skipped from every panel. The Cards panel held only `RegentCardsAnimeRework` and `AliceDefectCard`, both shared-path — correctly unmarked. The result: the marker was unreachable on that install. The Mixed panel now carries the same marker.
+- The data existed but never reached the badge: the boot log's `card_mode:` comes straight from the path scan, while the badge reads `DetectedSkinMod.CardOverrideMode`, which v0.26.0 only populated on the Cards branch. The Character branches (which feed the Mixed panel) left it at the default.
+
+### Added — the Mixed panel's order is judged on the body too, not just the cards
+- A mixed row's order is a single pck-mount lever governing every domain the mod ships, so the row is labelled from **body and cards combined**: both mod-private → ⚠ (the order does nothing at all), one of each → ◐ (it moves part of the mod), both shared → unmarked.
+- Measuring the body mattered, and overturned the obvious guess. The intuition was "the order still moves the body, just not the cards" — false for ATA: it namespaces its spine (`res://ATA_IronClad/animations/characters/…`) **and** its `creature_visuals` scene, so a DLL decides its body as well and the order governs neither. Verified across installed pcks: `animations` root (base-owned) for `AncientWaifus` / `raye` / `Ryoshu`, own-id root for `ATA_IronClad` / `ATA_Silent`. The path-root check also flags `NecrobinderOstyVaalmonicaMod` as a mod-private body.
+- Path judging is now one pass over `res://{root}/{rest}` shared by both domains. Re-validated against the v0.26.0 card ground truth: **0 regressions** across all 9 packs.
+
+### Fixed — long tooltips ran off the screen as one line
+- Godot's stock tooltip is a `PopupPanel` + `Label` with autowrap **off**, so every explanation rendered as a single line — `blocked_mod_toggle_tooltip` is 242 characters. Autowrap is a property, not a theme item, so a `Theme` cannot fix it; `_MakeCustomTooltip` is the only hook, and it must be overridden on the concrete control. Added wrapping variants for the three control types carrying long tooltips (Label, Button, CheckBox) and applied them to all five: blocked-mod, custom-character and All Mods checkboxes, the 🧍/🃏 mixed toggles, and the new ⚠/◐ badges.
+- The wrap width is a `CustomMinimumSize`, not decoration: an autowrapping Label reports its full single-line width as its minimum unless constrained, and the tooltip popup sizes to that minimum — so autowrap alone would still have rendered one line.
+
+### Fixed — the hover preview rendered behind the panel
+- The dropdown row, the preview and the tab panel are all children of the character-select screen and all sat at `ZIndex = 1000`. Godot breaks a Z tie by tree order, and the panel is attached last, so it drew over the preview image. The preview now sits at 3100 — above the panel, and above the drag indicator, whose `ZIndex = 2000` inside a row resolves to an effective 3000 through relative-Z inheritance.
+
+### Verification
+- ⚠ badge in the Mixed panel, wrapped tooltips and the preview z-order confirmed in-game by the user. Release build clean.
+- Unchanged from v0.26.0: this marks the inert case, it does not make ordering work for mod-private mods. Still awaiting the reporter's log (`card_mode:` / `body_mode:` per mod) to decide whether driving RitsuLib's registry directly is worth it.
+
 ## [0.26.0] - 2026-07-16
 
 ### Added — Cards panel now says which rows the priority order can actually control
