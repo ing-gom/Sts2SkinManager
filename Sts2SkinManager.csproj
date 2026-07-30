@@ -1,4 +1,4 @@
-<Project Sdk="Godot.NET.Sdk/4.5.1">
+<Project Sdk="Godot.NET.Sdk/4.5.1" InitialTargets="CheckSts2ModKit">
     <!-- Sts2.ModKit, in priority order: the shared sibling checkout used in the multi-mod dev
          tree, else the pinned external/Sts2.ModKit submodule that makes a standalone clone of
          this repository build. Neither present -> readable error from CheckSts2ModKit below. -->
