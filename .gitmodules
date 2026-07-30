@@ -1,0 +1,3 @@
+[submodule "external/Sts2.ModKit"]
+	path = external/Sts2.ModKit
+	url = https://github.com/ing-gom/sts2-modkit.git
