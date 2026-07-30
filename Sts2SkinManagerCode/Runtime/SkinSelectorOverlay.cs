@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using Godot;
@@ -50,9 +51,14 @@ public static class SkinSelectorOverlay
     // Inner layout: one TabContainer with four tabs (Applied / Card skins / Mixed / Other), tab
     // headers along the top. Tab titles are kept short so all four fit without overflow arrows.
     private static VBoxContainer? _accordionVBox;
+    private static HBoxContainer? _accordionTopRow;
     private static Button? _outerToggleBtn;
     private static VBoxContainer? _outerBody;
     private static bool _outerExpanded = false;
+    // When the header is dragged into the bottom half of the screen, the accordion body opens
+    // UPWARD instead of downward (header stays put) so the expanded panel can't run off the
+    // bottom edge. Recomputed live in PositionAccordion from the current drag offset.
+    private static bool _accordionFlipped = false;
     private static TabContainer? _tabContainer;
     private static Button? _cardPackSaveBtn;
     private static Button? _cardPackDiscardBtn;
@@ -129,6 +135,9 @@ public static class SkinSelectorOverlay
         IReadOnlySet<string>? vanillaCardsEligible = null)
     {
         _choicesPath = choicesPath;
+        var dir = Path.GetDirectoryName(choicesPath);
+        _layoutPath = string.IsNullOrEmpty(dir) ? "overlay_layout.json" : Path.Combine(dir, "overlay_layout.json");
+        LoadLayout();
         _byCharacter = byCharacter;
         _cardMods = cardMods;
         _mixedMods = mixedMods;
@@ -172,6 +181,14 @@ public static class SkinSelectorOverlay
     public enum OverlayAnchor { Left, Right }
     private static OverlayAnchor _overlayAnchor = OverlayAnchor.Right;
 
+    // Free-form drag offset (screen pixels) applied on TOP of the anchored base position, so the
+    // whole overlay (dropdown row + preview + accordion panel) can be nudged clear of whatever
+    // another mod parks in the same corner. Anchor (Left/Right) still decides the base corner;
+    // this is the delta from it. Persisted to overlay_layout.json — a file the ChoicesFileWatcher
+    // does NOT watch, so moving the menu never trips the restart/dirty machinery.
+    private static Vector2 _dragOffset = Vector2.Zero;
+    private static string _layoutPath = "";
+
     // ModConfigBridge calls this on startup (persisted value) and on user change.
     // Accepts "Top Left" / "Top Right" (case-insensitive), with prefix match so "Left"/"Right" also work.
     public static void SetAnchor(string? value)
@@ -191,60 +208,277 @@ public static class SkinSelectorOverlay
         if (_accordionVBox != null && GodotObject.IsInstanceValid(_accordionVBox)) PositionAccordion(_accordionVBox);
     }
 
+    // Base vertical layout (pre-drag), top-anchored. The header row is the pivot everything
+    // mirrors around when flipped: normal order is dropdown → header → body (growing down);
+    // flipped order is body (growing up) → header → dropdown. The header itself never moves.
+    private const float HboxTop = 40f;
+    private const float HboxH = 56f;
+    private const float AccordionHeaderTop = 110f;   // base Y of the collapsed header (pre-drag)
+    private const float AccordionHeaderH = 40f;
+    private const float FlipGap = 14f;               // dropdown↔header gap, preserved in the mirror
+    // Where the dropdown lands when flipped: just below the header's bottom edge.
+    private const float HboxFlippedTop = AccordionHeaderTop + AccordionHeaderH + FlipGap; // 164
+
+    // Flip once the header is dragged past the screen's vertical midpoint. Pure read — the child
+    // reorder side effect lives in PositionAccordion so all callers agree on the same boolean.
+    private static bool ComputeFlip()
+    {
+        var vp = GetViewportSize();
+        return vp.Y > 0f && (AccordionHeaderTop + _dragOffset.Y) > vp.Y * 0.5f;
+    }
+
     private static void PositionHbox(Control c)
     {
+        // Below the header when flipped (mirror), above it normally.
+        var top = ComputeFlip() ? HboxFlippedTop : HboxTop;
         if (_overlayAnchor == OverlayAnchor.Left)
-            AnchorTopLeft(c, width: 420, height: 56, offsetLeft: 40, offsetTop: 40);
+            AnchorTopLeft(c, width: 420, height: HboxH, offsetLeft: 40, offsetTop: top);
         else
-            AnchorTopRight(c, width: 420, height: 56, offsetRight: 40, offsetTop: 40);
+            AnchorTopRight(c, width: 420, height: HboxH, offsetRight: 40, offsetTop: top);
     }
 
     // Preview sits opposite to the dropdown: right of hbox in Left mode, left of hbox in Right mode.
     // 540 inset preserves the original 80px gap (hbox is 420 wide + 40 base margin + 80 gap).
+    // When flipped it bottom-anchors beside the header and grows upward so it can't run off-screen.
     private static void PositionPreview(Control c)
     {
-        if (_overlayAnchor == OverlayAnchor.Left)
-            AnchorTopLeft(c, width: 240, height: 280, offsetLeft: 540, offsetTop: 40);
+        if (!ComputeFlip())
+        {
+            if (_overlayAnchor == OverlayAnchor.Left)
+                AnchorTopLeft(c, width: 240, height: 280, offsetLeft: 540, offsetTop: HboxTop);
+            else
+                AnchorTopRight(c, width: 240, height: 280, offsetRight: 540, offsetTop: HboxTop);
+        }
         else
-            AnchorTopRight(c, width: 240, height: 280, offsetRight: 540, offsetTop: 40);
+        {
+            var vp = GetViewportSize();
+            var headerBottom = AccordionHeaderTop + _dragOffset.Y + AccordionHeaderH;
+            if (_overlayAnchor == OverlayAnchor.Left)
+                AnchorBottomLeft(c, width: 240, minHeight: 280, offsetLeft: 540, bottomScreenY: headerBottom, viewportH: vp.Y);
+            else
+                AnchorBottomRight(c, width: 240, minHeight: 280, offsetRight: 540, bottomScreenY: headerBottom, viewportH: vp.Y);
+        }
     }
 
     private static void PositionAccordion(Control c)
     {
-        if (_overlayAnchor == OverlayAnchor.Left)
-            AnchorTopLeft(c, width: 480, height: 40, offsetLeft: 40, offsetTop: 110);
+        var vp = GetViewportSize();
+        var flip = ComputeFlip();
+        if (flip != _accordionFlipped)
+        {
+            _accordionFlipped = flip;
+            ApplyAccordionOrder();
+        }
+
+        if (!flip)
+        {
+            if (_overlayAnchor == OverlayAnchor.Left)
+                AnchorTopLeft(c, width: 480, height: AccordionHeaderH, offsetLeft: 40, offsetTop: AccordionHeaderTop);
+            else
+                AnchorTopRight(c, width: 480, height: AccordionHeaderH, offsetRight: 40, offsetTop: AccordionHeaderTop);
+        }
         else
-            AnchorTopRight(c, width: 480, height: 40, offsetRight: 40, offsetTop: 110);
+        {
+            // Bottom-anchored, grows up. The vbox's bottom edge is pinned to the header's bottom
+            // (headerTop + headerH); with body-first child order the header lands at that bottom.
+            var headerBottom = AccordionHeaderTop + _dragOffset.Y + AccordionHeaderH;
+            if (_overlayAnchor == OverlayAnchor.Left)
+                AnchorBottomLeft(c, width: 480, minHeight: AccordionHeaderH, offsetLeft: 40, bottomScreenY: headerBottom, viewportH: vp.Y);
+            else
+                AnchorBottomRight(c, width: 480, minHeight: AccordionHeaderH, offsetRight: 40, bottomScreenY: headerBottom, viewportH: vp.Y);
+        }
     }
 
-    // Anchors a control to the parent's TOP-LEFT corner.
+    // In flipped mode the body must render ABOVE the header, so it becomes the first child; in
+    // normal mode the header is first. MoveChild is cheap and safe to call every flip transition.
+    private static void ApplyAccordionOrder()
+    {
+        if (_accordionVBox == null || !GodotObject.IsInstanceValid(_accordionVBox)) return;
+        if (_accordionTopRow == null || !GodotObject.IsInstanceValid(_accordionTopRow)) return;
+        if (_outerBody == null || !GodotObject.IsInstanceValid(_outerBody)) return;
+        if (_accordionFlipped)
+        {
+            _accordionVBox.MoveChild(_outerBody, 0);
+            _accordionVBox.MoveChild(_accordionTopRow, 1);
+        }
+        else
+        {
+            _accordionVBox.MoveChild(_accordionTopRow, 0);
+            _accordionVBox.MoveChild(_outerBody, 1);
+        }
+    }
+
+    private static StyleBoxFlat MakeGripStyle(bool hovered)
+    {
+        var sb = new StyleBoxFlat
+        {
+            BgColor = hovered ? new Color(0.34f, 0.38f, 0.46f, 0.95f) : new Color(0.22f, 0.25f, 0.31f, 0.9f),
+            BorderColor = hovered ? new Color(0.7f, 0.78f, 0.9f, 0.95f) : new Color(0.5f, 0.55f, 0.65f, 0.85f),
+            ContentMarginLeft = 2, ContentMarginRight = 2, ContentMarginTop = 2, ContentMarginBottom = 2,
+        };
+        sb.SetBorderWidthAll(1);
+        sb.SetCornerRadiusAll(4);
+        return sb;
+    }
+
+    // Anchors a control to the parent's TOP-LEFT corner. _dragOffset shifts it in screen pixels
+    // (offsets are uniform pixel space, so the same delta translates any anchor equally).
     private static void AnchorTopLeft(Control c, float width, float height, float offsetLeft, float offsetTop)
     {
         c.AnchorLeft = 0f;
         c.AnchorRight = 0f;
         c.AnchorTop = 0f;
         c.AnchorBottom = 0f;
-        c.OffsetLeft = offsetLeft;
-        c.OffsetRight = offsetLeft + width;
-        c.OffsetTop = offsetTop;
-        c.OffsetBottom = offsetTop + height;
+        c.OffsetLeft = offsetLeft + _dragOffset.X;
+        c.OffsetRight = offsetLeft + width + _dragOffset.X;
+        c.OffsetTop = offsetTop + _dragOffset.Y;
+        c.OffsetBottom = offsetTop + height + _dragOffset.Y;
         c.GrowHorizontal = Control.GrowDirection.End;
         c.GrowVertical = Control.GrowDirection.End;
     }
 
-    // Anchors a control to the parent's TOP-RIGHT corner.
+    // Anchors a control to the parent's TOP-RIGHT corner. _dragOffset shifts it the same way — a
+    // right-anchored control has negative base offsets, but adding the delta to both edges still
+    // translates it by (dx, dy) screen pixels.
     private static void AnchorTopRight(Control c, float width, float height, float offsetRight, float offsetTop)
     {
         c.AnchorLeft = 1f;
         c.AnchorRight = 1f;
         c.AnchorTop = 0f;
         c.AnchorBottom = 0f;
-        c.OffsetLeft = -(offsetRight + width);
-        c.OffsetRight = -offsetRight;
-        c.OffsetTop = offsetTop;
-        c.OffsetBottom = offsetTop + height;
+        c.OffsetLeft = -(offsetRight + width) + _dragOffset.X;
+        c.OffsetRight = -offsetRight + _dragOffset.X;
+        c.OffsetTop = offsetTop + _dragOffset.Y;
+        c.OffsetBottom = offsetTop + height + _dragOffset.Y;
         c.GrowHorizontal = Control.GrowDirection.Begin;
         c.GrowVertical = Control.GrowDirection.End;
+    }
+
+    // Bottom-anchored variants for flipped mode: the control's bottom edge is pinned to a screen Y
+    // and it grows UPWARD (GrowVertical.Begin) as its content expands. dy is already folded into
+    // bottomScreenY by the caller, so only dragOffset.X is added here (horizontal is unchanged).
+    private static void AnchorBottomLeft(Control c, float width, float minHeight, float offsetLeft, float bottomScreenY, float viewportH)
+    {
+        c.AnchorLeft = 0f;
+        c.AnchorRight = 0f;
+        c.AnchorTop = 1f;
+        c.AnchorBottom = 1f;
+        c.OffsetLeft = offsetLeft + _dragOffset.X;
+        c.OffsetRight = offsetLeft + width + _dragOffset.X;
+        c.OffsetBottom = bottomScreenY - viewportH;
+        c.OffsetTop = bottomScreenY - viewportH - minHeight;
+        c.GrowHorizontal = Control.GrowDirection.End;
+        c.GrowVertical = Control.GrowDirection.Begin;
+    }
+
+    private static void AnchorBottomRight(Control c, float width, float minHeight, float offsetRight, float bottomScreenY, float viewportH)
+    {
+        c.AnchorLeft = 1f;
+        c.AnchorRight = 1f;
+        c.AnchorTop = 1f;
+        c.AnchorBottom = 1f;
+        c.OffsetLeft = -(offsetRight + width) + _dragOffset.X;
+        c.OffsetRight = -offsetRight + _dragOffset.X;
+        c.OffsetBottom = bottomScreenY - viewportH;
+        c.OffsetTop = bottomScreenY - viewportH - minHeight;
+        c.GrowHorizontal = Control.GrowDirection.Begin;
+        c.GrowVertical = Control.GrowDirection.Begin;
+    }
+
+    // Called by MenuDragHandle for each frame of mouse motion while dragging. Accumulates the
+    // relative delta, clamps it so the menu can't vanish off-screen, and re-lays-out all groups.
+    public static void OnDragDelta(Vector2 relative)
+    {
+        _dragOffset += relative;
+        ClampDragOffset();
+        Reposition();
+    }
+
+    // Drag finished — persist the new position.
+    public static void OnDragEnd() => SaveLayout();
+
+    // Double-click on the grip: snap back to the anchored corner.
+    public static void ResetLayout()
+    {
+        if (_dragOffset == Vector2.Zero) return;
+        _dragOffset = Vector2.Zero;
+        Reposition();
+        SaveLayout();
+    }
+
+    private static Vector2 GetViewportSize()
+    {
+        var probe = _accordionVBox ?? _hbox;
+        if (probe != null && GodotObject.IsInstanceValid(probe) && probe.IsInsideTree())
+            return probe.GetViewportRect().Size;
+        return Vector2.Zero;
+    }
+
+    // Keep the collapsed header (grip + toggle + Save/Discard) and the dropdown row reachable no
+    // matter how far the user drags. Bounds are computed against the accordion's analytic base
+    // position (base + offset = on-screen position for an anchored control).
+    private static void ClampDragOffset()
+    {
+        var vp = GetViewportSize();
+        if (vp == Vector2.Zero) return;
+
+        const float accW = 480f;   // accordion width (PositionAccordion)
+        const float keepX = 180f;  // min horizontal sliver of the header kept on-screen
+        var accBaseLeft = _overlayAnchor == OverlayAnchor.Left ? 40f : vp.X - 40f - accW;
+        var absLeft = accBaseLeft + _dragOffset.X;
+        absLeft = Mathf.Clamp(absLeft, -(accW - keepX), vp.X - keepX);
+        _dragOffset.X = absLeft - accBaseLeft;
+
+        // Vertical: the always-visible bottom-most element differs by flip mode.
+        //  - Normal: header row is lowest (collapsed) — keep it on-screen.
+        //  - Flipped: the dropdown moves below the header, so IT is lowest — keep its bottom on-screen.
+        var minDy = 8f - HboxTop;          // dropdown row top (40) stays >= 8 in normal mode
+        float maxDy;
+        if (ComputeFlip())
+        {
+            var dropdownBottomBase = HboxFlippedTop + HboxH;   // 220 (dropdown sits below the header)
+            maxDy = (vp.Y - 8f) - dropdownBottomBase;
+        }
+        else
+        {
+            maxDy = (vp.Y - 4f) - (AccordionHeaderTop + AccordionHeaderH); // header bottom (150) ~on-screen
+        }
+        if (maxDy < minDy) maxDy = minDy;
+        _dragOffset.Y = Mathf.Clamp(_dragOffset.Y, minDy, maxDy);
+    }
+
+    private static void LoadLayout()
+    {
+        _dragOffset = Vector2.Zero;
+        try
+        {
+            if (string.IsNullOrEmpty(_layoutPath) || !File.Exists(_layoutPath)) return;
+            var parts = File.ReadAllText(_layoutPath).Trim().Split(',');
+            if (parts.Length == 2
+                && float.TryParse(parts[0], NumberStyles.Float, CultureInfo.InvariantCulture, out var x)
+                && float.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out var y))
+            {
+                _dragOffset = new Vector2(x, y);
+            }
+        }
+        catch (Exception ex)
+        {
+            MainFile.Logger.Warn($"overlay layout load failed: {ex.Message}");
+        }
+    }
+
+    private static void SaveLayout()
+    {
+        try
+        {
+            if (string.IsNullOrEmpty(_layoutPath)) return;
+            var text = $"{_dragOffset.X.ToString(CultureInfo.InvariantCulture)},{_dragOffset.Y.ToString(CultureInfo.InvariantCulture)}";
+            File.WriteAllText(_layoutPath, text);
+        }
+        catch (Exception ex)
+        {
+            MainFile.Logger.Warn($"overlay layout save failed: {ex.Message}");
+        }
     }
 
     private static void DoAttach(Node screen)
@@ -354,6 +588,11 @@ public static class SkinSelectorOverlay
                 BuildAccordionPanel(screen);
 
             EnsureLocaleSubscribed();
+
+            // A persisted offset may have been saved at a different resolution; pull it back
+            // on-screen once every group is in the tree (viewport size is only readable then).
+            if (_dragOffset != Vector2.Zero)
+                Callable.From(() => { ClampDragOffset(); Reposition(); }).CallDeferred();
         }
         catch (Exception ex)
         {
@@ -680,12 +919,47 @@ public static class SkinSelectorOverlay
         // those mod kinds exist; the Other Mods section only when there's something to surface.
         var hasManageTabs = _cardMods.Count > 0 || _mixedMods.Count > 0 || _allMods.Count > 0;
 
-        // Top row — outer expand/collapse toggle + Save / Discard.
+        // Top row — drag grip + outer expand/collapse toggle + Save / Discard.
         var topRow = new HBoxContainer { CustomMinimumSize = new Vector2(480, 36) };
+        _accordionTopRow = topRow;
+
+        // Grab handle: drag it to move the whole overlay clear of another mod's corner UI;
+        // double-click resets to the anchored corner. Kept first so it's the always-visible
+        // left edge of the collapsed "menu bar". A filled Panel background (not a transparent
+        // Control) makes it read as a grabbable button; it brightens on hover.
+        var dragGrip = new MenuDragHandle
+        {
+            CustomMinimumSize = new Vector2(34, 36),
+            MouseFilter = Control.MouseFilterEnum.Stop,
+            MouseDefaultCursorShape = Control.CursorShape.Move,
+            TooltipText = Strings.Get("overlay_drag_tooltip"),
+        };
+        var gripBg = new Panel { MouseFilter = Control.MouseFilterEnum.Ignore };
+        gripBg.SetAnchorsPreset(Control.LayoutPreset.FullRect);
+        gripBg.AddThemeStyleboxOverride("panel", MakeGripStyle(false));
+        dragGrip.AddChild(gripBg);
+        dragGrip.MouseEntered += () =>
+        {
+            if (GodotObject.IsInstanceValid(gripBg)) gripBg.AddThemeStyleboxOverride("panel", MakeGripStyle(true));
+        };
+        dragGrip.MouseExited += () =>
+        {
+            if (GodotObject.IsInstanceValid(gripBg)) gripBg.AddThemeStyleboxOverride("panel", MakeGripStyle(false));
+        };
+        var gripLabel = new Label
+        {
+            Text = "⋮⋮",
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+            MouseFilter = Control.MouseFilterEnum.Ignore,
+        };
+        gripLabel.SetAnchorsPreset(Control.LayoutPreset.FullRect);
+        dragGrip.AddChild(gripLabel);
+        topRow.AddChild(dragGrip);
 
         var outerToggle = new Button
         {
-            CustomMinimumSize = new Vector2(220, 36),
+            CustomMinimumSize = new Vector2(188, 36),
             Alignment = HorizontalAlignment.Left,
         };
         _outerToggleBtn = outerToggle;
@@ -875,6 +1149,11 @@ public static class SkinSelectorOverlay
         UpdateCustomCharHeader();
         ApplyOuterExpanded();
         UpdateOuterToggleText();
+
+        // Reconcile child order with the flip state now that both header row and body exist
+        // (PositionAccordion may have set _accordionFlipped earlier, when the guards in
+        // ApplyAccordionOrder still short-circuited because the children weren't built yet).
+        ApplyAccordionOrder();
 
         vbox.ZIndex = 1000;
         screen.AddChild(vbox);

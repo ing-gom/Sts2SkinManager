@@ -4,6 +4,26 @@ All notable changes to Sts2SkinManager are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.27.1] - 2026-07-22
+
+### Added — drag the whole menu anywhere on the screen (⋮⋮ grip)
+- The overlay could only sit in one of two corners, and the anchor dropdown only swaps between them — which is no help when *another* mod parks its own menu bar in both. The collapsed header now starts with a **⋮⋮ grip**: drag it to move the entire overlay (dropdown row + hover preview + tab panel) as one unit; **double-click resets** it to the anchored corner. Tooltip localized in all 16 languages (`overlay_drag_tooltip`).
+- The drag is a **screen-space delta on top of the anchor**, not a new positioning mode: every group is still anchored to its corner (`Left`/`Right` from the settings dropdown) and the same `(dx, dy)` is added to both horizontal offsets, which translates a right-anchored control — whose base offsets are negative — by exactly the same pixels as a left-anchored one. So one offset serves both anchors and the existing layout code is untouched apart from the `+ _dragOffset` term.
+- Drag continues after the cursor slides off the grip. `_GuiInput` only fires while the pointer is inside the control, so it just starts/stops the drag; the motion itself is carried in `_Input`, which runs ahead of GUI routing. Without that split a fast drag "slips off" the handle and the menu stops following the mouse.
+- **Persisted to its own file** (`overlay_layout.json`, next to `skin_choices.json`) rather than into `skin_choices.json`. That file is watched by `ChoicesFileWatcher` and any write to it pops the restart/countdown modal — moving a menu must not look like a skin change. Saved on drag end only, not per motion frame.
+- The offset is clamped so the menu can never be lost off-screen: at least a 180 px horizontal sliver of the header stays visible, and vertically whichever element is lowest is kept on-screen. The clamp is re-applied once on attach, because a position saved at one resolution can land off-screen at another.
+
+### Added — the panel opens upward when the menu is dragged into the bottom half
+- Dragging the header below the screen's vertical midpoint would have made the expanded body grow straight off the bottom edge. Past that midpoint the accordion **flips**: the body is moved to be the first child and the group switches to bottom-anchored with `GrowVertical.Begin`, so it grows *up* from the header — and the dropdown row mirrors to just below the header. The header itself never moves, so the flip is invisible while collapsed.
+- Child reordering (`MoveChild`) is the flip's only structural side effect and lives in one place (`ApplyAccordionOrder`), called both on the flip transition and once after the header row and body are built — the early call from `PositionAccordion` short-circuits while those children don't exist yet.
+
+### Changed — settings registration moved to the shared ModKit bridge
+- `ModConfigBridge` was ~110 lines of hand-rolled reflection against `ModConfig.ModConfigApi`. It now delegates to `Sts2.ModKit.Config.ModConfigBridge`, which registers through **either RitsuLib or ModConfig** (RitsuLib preferred) and no-ops with defaults when neither is installed — so the mod still has zero hard dependency, and users with only RitsuLib now get the overlay-position dropdown too. The local class name is kept so `MainFile`'s call site is unchanged.
+- The build moved to `Sts2.ModKit.props` (shared references / publicizer / mods-folder copy), and an `AssemblyResolverBootstrap` module initializer registers the `AssemblyLoadContext.Resolving` hook the ModKit consumers need. **Build note:** the project now imports `..\Sts2.ModKit\build\Sts2.ModKit.props`, so building from a standalone clone of this repository requires the sibling `Sts2.ModKit` directory.
+
+### Verification
+- Release build clean and shipped to the Steam Workshop as 0.27.1 (item 3747513223). Both the drag/flip geometry and the clamp are analytic — computed from the anchors' base offsets and the viewport size rather than measured from the tree — so they hold at any resolution without a layout pass; in-game confirmation of the flip at low resolutions is still worth a look.
+
 ## [0.27.0] - 2026-07-16
 
 ### Fixed — the ⚠ marker never reached the mods that need it

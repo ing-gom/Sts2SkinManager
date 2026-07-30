@@ -72,6 +72,7 @@ public static class Strings
             ["mixed_indicator_tooltip"] = "📦 Mixed mod — applies spine + card art / events together.",
             ["mixed_panel_help"] = "Character pick from the dropdown loads first.",
             ["skin_manager_section_header"] = "Skin manager",
+            ["overlay_drag_tooltip"] = "Drag to move the menu. Double-click to reset its position.",
             ["all_mods_panel_header"] = "Other mods",
             ["all_mods_panel_help"] = "Character skin variants, content mods, and DLL mods that don't fit Card or Mixed tabs. Toggle the checkbox to enable/disable management. Pick a base character to force the mod into that skin slot (its DLL will be blocked when another skin is active).",
             ["blocked_mod_toggle_tooltip"] = "Skin Manager blocked this mod's DLL (it was classified as a skin for another character that isn't active). If it's actually a standalone mod/character, check the box to restore it — it will be left un-managed and load normally on next launch.",
@@ -162,6 +163,7 @@ public static class Strings
             ["mixed_indicator_tooltip"] = "📦 혼합 mod — 스파인과 카드 아트 / 이벤트를 함께 적용",
             ["mixed_panel_help"] = "캐릭터 선택 모드가 먼저 로드됩니다.",
             ["skin_manager_section_header"] = "스킨 매니저",
+            ["overlay_drag_tooltip"] = "드래그해서 메뉴를 옮기세요. 더블클릭하면 위치가 초기화됩니다.",
             ["all_mods_panel_header"] = "그 외 mod",
             ["all_mods_panel_help"] = "카드/혼합 탭에 들어가지 않는 캐릭터 스킨, 컨텐츠 mod, DLL mod 목록. 체크박스로 관리 켜기/끄기. 베이스 캐릭터를 골라 그 슬롯에 강제 지정 가능 — 다른 스킨이 활성화되면 이 mod 의 DLL 이 차단됩니다.",
             ["all_mods_action_auto"] = "자동",
@@ -247,6 +249,7 @@ public static class Strings
             ["mixed_indicator_tooltip"] = "📦 混合 mod — スパインとカードアート / イベントを一緒に適用",
             ["mixed_panel_help"] = "上のキャラクター選択が先に読み込まれます。",
             ["skin_manager_section_header"] = "スキンマネージャー",
+            ["overlay_drag_tooltip"] = "ドラッグでメニューを移動できます。ダブルクリックで位置をリセット。",
         },
         ["ZHS"] = new()
         {
@@ -287,6 +290,7 @@ public static class Strings
             ["mixed_indicator_tooltip"] = "📦 混合 mod — 同时应用骨骼与卡牌图 / 事件",
             ["mixed_panel_help"] = "上方角色选择优先加载。",
             ["skin_manager_section_header"] = "皮肤管理器",
+            ["overlay_drag_tooltip"] = "拖动可移动菜单。双击可重置位置。",
         },
         ["ZHT"] = new()
         {
@@ -327,6 +331,7 @@ public static class Strings
             ["mixed_indicator_tooltip"] = "📦 混合 mod — 同時套用骨架與卡牌圖 / 事件",
             ["mixed_panel_help"] = "上方角色選擇優先載入。",
             ["skin_manager_section_header"] = "皮膚管理器",
+            ["overlay_drag_tooltip"] = "拖曳可移動選單。雙擊可重設位置。",
         },
         ["DEU"] = new()
         {
@@ -367,6 +372,7 @@ public static class Strings
             ["mixed_indicator_tooltip"] = "📦 Gemischter Mod — wendet Spine + Kartenkunst / Events zusammen an",
             ["mixed_panel_help"] = "Charakterauswahl oben wird zuerst geladen.",
             ["skin_manager_section_header"] = "Skin-Manager",
+            ["overlay_drag_tooltip"] = "Zum Verschieben des Menüs ziehen. Doppelklick setzt die Position zurück.",
         },
         ["FRA"] = new()
         {
@@ -407,6 +413,7 @@ public static class Strings
             ["mixed_indicator_tooltip"] = "📦 Mod mixte — applique squelette + cartes / événements ensemble",
             ["mixed_panel_help"] = "La sélection de personnage en haut est chargée en premier.",
             ["skin_manager_section_header"] = "Gestionnaire de skins",
+            ["overlay_drag_tooltip"] = "Glissez pour déplacer le menu. Double-cliquez pour réinitialiser sa position.",
         },
         ["SPA"] = new()
         {
@@ -447,6 +454,7 @@ public static class Strings
             ["mixed_indicator_tooltip"] = "📦 Mod mixto — aplica esqueleto + cartas / eventos juntos",
             ["mixed_panel_help"] = "La selección de personaje de arriba se carga primero.",
             ["skin_manager_section_header"] = "Gestor de skins",
+            ["overlay_drag_tooltip"] = "Arrastra para mover el menú. Doble clic para restablecer su posición.",
         },
         ["ESP"] = new()
         {
@@ -487,6 +495,7 @@ public static class Strings
             ["mixed_indicator_tooltip"] = "📦 Mod mixto — aplica esqueleto + cartas / eventos juntos",
             ["mixed_panel_help"] = "La selección de personaje de arriba se carga primero.",
             ["skin_manager_section_header"] = "Gestor de skins",
+            ["overlay_drag_tooltip"] = "Arrastra para mover el menú. Doble clic para restablecer su posición.",
         },
         ["ITA"] = new()
         {
@@ -527,6 +536,7 @@ public static class Strings
             ["mixed_indicator_tooltip"] = "📦 Mod misto — applica spine + carte / eventi insieme",
             ["mixed_panel_help"] = "La scelta del personaggio sopra viene caricata per prima.",
             ["skin_manager_section_header"] = "Gestore skin",
+            ["overlay_drag_tooltip"] = "Trascina per spostare il menu. Doppio clic per reimpostarne la posizione.",
         },
         ["PTB"] = new()
         {
@@ -567,6 +577,7 @@ public static class Strings
             ["mixed_indicator_tooltip"] = "📦 Mod misto — aplica spine + arte de cartas / eventos juntos",
             ["mixed_panel_help"] = "A escolha de personagem acima carrega primeiro.",
             ["skin_manager_section_header"] = "Gerenciador de skins",
+            ["overlay_drag_tooltip"] = "Arraste para mover o menu. Clique duplo para redefinir a posição.",
         },
         ["POR"] = new()
         {
@@ -607,6 +618,7 @@ public static class Strings
             ["mixed_indicator_tooltip"] = "📦 Mod misto — aplica spine + arte de cartas / eventos juntos",
             ["mixed_panel_help"] = "A escolha de personagem acima é carregada primeiro.",
             ["skin_manager_section_header"] = "Gestor de skins",
+            ["overlay_drag_tooltip"] = "Arraste para mover o menu. Clique duplo para repor a posição.",
         },
         ["POL"] = new()
         {
@@ -647,6 +659,7 @@ public static class Strings
             ["mixed_indicator_tooltip"] = "📦 Mod mieszany — stosuje szkielet + grafiki kart / wydarzeń razem",
             ["mixed_panel_help"] = "Wybór postaci powyżej ładuje się najpierw.",
             ["skin_manager_section_header"] = "Menedżer skinów",
+            ["overlay_drag_tooltip"] = "Przeciągnij, aby przesunąć menu. Kliknij dwukrotnie, aby zresetować pozycję.",
         },
         ["RUS"] = new()
         {
@@ -687,6 +700,7 @@ public static class Strings
             ["mixed_indicator_tooltip"] = "📦 Смешанный мод — применяет спайн + арт карт / события вместе",
             ["mixed_panel_help"] = "Выбор персонажа сверху загружается первым.",
             ["skin_manager_section_header"] = "Менеджер скинов",
+            ["overlay_drag_tooltip"] = "Перетащите, чтобы переместить меню. Двойной щелчок — сброс позиции.",
         },
         ["THA"] = new()
         {
@@ -727,6 +741,7 @@ public static class Strings
             ["mixed_indicator_tooltip"] = "📦 ม็อดผสม — ใช้สไปน์ + อาร์ตการ์ด / อีเวนต์ร่วมกัน",
             ["mixed_panel_help"] = "ตัวเลือกตัวละครด้านบนถูกโหลดก่อน",
             ["skin_manager_section_header"] = "ตัวจัดการสกิน",
+            ["overlay_drag_tooltip"] = "ลากเพื่อย้ายเมนู ดับเบิลคลิกเพื่อรีเซ็ตตำแหน่ง",
         },
         ["TUR"] = new()
         {
@@ -767,6 +782,7 @@ public static class Strings
             ["mixed_indicator_tooltip"] = "📦 Karışık mod — spine + kart sanatını / olayları birlikte uygular",
             ["mixed_panel_help"] = "Yukarıdaki karakter seçimi önce yüklenir.",
             ["skin_manager_section_header"] = "Skin yöneticisi",
+            ["overlay_drag_tooltip"] = "Menüyü taşımak için sürükleyin. Konumu sıfırlamak için çift tıklayın.",
         },
     };
 }
