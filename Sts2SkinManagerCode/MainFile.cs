@@ -504,17 +504,17 @@ public partial class MainFile : Node
     // Keep SkinManager loading BEFORE the skin mods it suppresses (so its TryLoadMod prefix can
     // disable them at runtime), without fighting unrelated "force-first" mods.
     //
-    // Strategy:
-    //  1. Targets = the character skins we actually block (not the active pick) and haven't already
-    //     resolved via persistent-disable. We only need to precede these.
-    //  2. If we sit behind a target, reorder ourselves just ahead of it (one restart, picked up next
-    //     boot). We record that we reordered.
-    //  3. If we reordered LAST boot and we're STILL behind a target, another mod keeps grabbing the
-    //     front — a war we can't win by reordering. Escalate: persistently disable the blocking
-    //     skin(s) via is_enabled=false. The game strips disabled mods before any mod loads, so they
-    //     can't re-sort themselves — the conflict ends deterministically in one restart.
-    //  4. Auto-heal: if the user later picks a skin we'd disabled (it's now a "keep"), re-enable it;
-    //     drop entries whose mod is gone.
+    // Strategy (the reorder step this used to describe is gone — see the v0.23.0 note in the body):
+    //  1. Targets = character skins that contradict a choice the user actually made
+    //     (ConflictsWithUserChoice) and that we haven't already resolved via persistent-disable.
+    //     A character nobody has picked for is NOT a target — treating it as one is what made
+    //     v0.27.1 and earlier disable a fresh install's entire skin collection (fixed in v0.27.2).
+    //  2. A target sitting AHEAD of us in mod_list couldn't be intercepted this boot, so disable it
+    //     via is_enabled=false. The game strips disabled mods before any mod loads, so the conflict
+    //     ends deterministically in one restart with no mod_list reordering.
+    //  3. Auto-heal: if the user later picks a skin we'd disabled (it's now a "keep"), re-enable it;
+    //     re-enable anything disabled without a user decision behind it; drop entries whose mod is
+    //     gone.
     private static void ApplyLoadOrderBootstrap(
         Sts2SettingsFile? settings,
         List<DetectedSkinMod> characterMods,
@@ -526,10 +526,45 @@ public partial class MainFile : Node
         if (settings == null) return;
 
         var detectedCharIds = new HashSet<string>(characterMods.Select(d => d.ModId), StringComparer.OrdinalIgnoreCase);
+        var modById = new Dictionary<string, DetectedSkinMod>(StringComparer.OrdinalIgnoreCase);
+        foreach (var d in characterMods) modById[d.ModId] = d;
+
+        // Does this mod contradict a choice the USER actually made? Only then is disabling it
+        // justified.
+        //
+        // The old rule was "not the active pick" — but on a fresh install nobody has picked
+        // anything, and SyncAvailableVariants seeds every detected character with the placeholder
+        // Active="default". That read identically to "the user wants vanilla everywhere", so every
+        // skin mod became a suppression target. Combined with the game appending newly-installed
+        // mods to the END of mod_list (so SkinManager starts behind everything already installed),
+        // the very first boot disabled the user's entire skin collection at once — reported from
+        // the Workshop page, and the exact opposite of what installing a skin manager should do.
+        //
+        // CharacterSkinChoice.UserChosen separates the two: it is only set when the dropdown writes
+        // a selection (including an explicit "default"). A character nobody has touched is left
+        // alone, and an early-loading skin there just keeps doing what it did before SkinManager
+        // existed — the status quo the user installed it for.
+        //
+        // A mod skinning several characters counts as conflicting if it contradicts ANY decided
+        // one: that decision is real and the mod would override it. The undecided characters it
+        // also covers lose their (unchosen) skin as collateral — acceptable, and the All Mods
+        // checkbox re-enables it.
+        bool ConflictsWithUserChoice(DetectedSkinMod d)
+        {
+            foreach (var c in d.Characters)
+            {
+                if (!choices.Characters.TryGetValue(c, out var choice)) continue;
+                if (!choice.UserChosen) continue; // never decided → nothing to defend.
+                if (string.Equals(choice.Active, d.ModId, StringComparison.OrdinalIgnoreCase)) continue;
+                return true;
+            }
+            return false;
+        }
 
         // Auto-heal the resolved-by-disable set. Re-enabling needs a restart (the game loads it next
         // boot); a stale entry (mod uninstalled) is just forgotten.
         var enableChanges = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+        var restoredMods = new List<string>();
         foreach (var id in choices.LoadOrderResolvedByDisable.ToList())
         {
             if (keepDllModIds.Contains(id))
@@ -541,12 +576,23 @@ public partial class MainFile : Node
             {
                 choices.LoadOrderResolvedByDisable.Remove(id); // mod gone; nothing to re-enable.
             }
+            else if (modById.TryGetValue(id, out var d) && !ConflictsWithUserChoice(d))
+            {
+                // Retroactive repair for anyone already hit by the old rule: this mod was disabled
+                // without a user decision behind it. Give it back. Pre-flag configs are handled by
+                // LoadOrEmpty's inference, so a skin blocking a real pick still fails the check here
+                // and stays disabled — only the ones disabled for no reason come back.
+                enableChanges[id] = true;
+                choices.LoadOrderResolvedByDisable.Remove(id);
+                restoredMods.Add(id);
+            }
         }
 
         // We only need to precede skins we suppress AND haven't already disabled (a disabled mod
         // never loads, so order is irrelevant for it).
         var loadOrderTargets = characterMods
             .Where(d => !keepDllModIds.Contains(d.ModId) && !choices.LoadOrderResolvedByDisable.Contains(d.ModId))
+            .Where(ConflictsWithUserChoice)
             .Select(d => d.ModId)
             .ToList();
 
@@ -614,6 +660,14 @@ public partial class MainFile : Node
         {
             Logger.Warn($"load-order: blocked {disabledForConflict.Count} skin(s) that load before SkinManager by disabling them (no mod_list reorder — keeps content-mod save ids stable): [{string.Join(",", disabledForConflict)}]. *** RESTART STS2 ONCE *** to apply.");
             RestartCountdownModal.ShowOrReset(managerDataDir, 10, "load_order_conflict_title", "load_order_conflict_body");
+        }
+        else if (restoredMods.Count > 0)
+        {
+            // One-time repair: skins an earlier version disabled without a user decision behind it.
+            // Its own modal, because the generic one says "to change the skin…" and the user did not
+            // change anything — their mods are simply being handed back.
+            Logger.Warn($"load-order: restored {restoredMods.Count} skin mod(s) disabled by an earlier version with no user choice behind it: [{string.Join(",", restoredMods)}]. *** RESTART STS2 ONCE *** to apply.");
+            RestartCountdownModal.ShowOrReset(managerDataDir, 10, "load_order_restored_title", "load_order_restored_body");
         }
         else if (settingsChanged)
         {

@@ -4,6 +4,24 @@ All notable changes to Sts2SkinManager are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.27.2] - 2026-08-03
+
+### Fixed — a fresh install disabled every skin mod the user already had
+- Reported on the Workshop page: on the first run, a modal announced that skin mods were loading ahead of Skin Manager, and then those skin mods were switched off in the mod list. The modal was ours (`load_order_conflict_body`) and so was the damage — this is the load-order conflict resolver firing on an install where there was no conflict to resolve.
+- Two things had to line up. `SyncAvailableVariants` seeds every detected character with a placeholder `active: "default"`, and the disable rule read "not the active pick" as grounds for suppression — so a config nobody had touched yet parsed identically to "the user wants vanilla on every character". Meanwhile the game appends newly-installed mods to the **end** of `mod_list` (`SortModList` scores anything unlisted at `999999999`), so Skin Manager starts out *behind* everything already installed. Every skin mod was a target, and every target was ahead of us: the whole collection went off in one boot.
+- The gate is now a user decision, not the absence of one. `CharacterSkinChoice.user_chosen` is set only where the dropdown writes a selection — including an explicit "default", since picking vanilla is a decision worth defending — and an early-loading skin is disabled only when it contradicts a character that has one. Characters nobody has picked for are left alone, and their skins keep doing exactly what they did before Skin Manager was installed.
+- **Already-affected installs repair themselves.** Any mod in `_load_order_resolved_by_disable` that no longer has a user decision behind it is re-enabled on the next boot, with its own modal (`load_order_restored_*`, 16 languages) rather than the generic "to change the skin…" one — the user changed nothing, they are just getting their mods back.
+
+### Migration — a non-default pick is proof of a decision
+- Existing configs carry no `user_chosen` flag, so treating them all as undecided would have handed back conflicts that were correctly resolved. `LoadOrEmpty` instead infers the flag: `active` can only be non-default if it came from the dropdown (`SyncAvailableVariants` writes nothing but `"default"`), so a non-default pick sets it. `active: "default"` stays ambiguous and is left undecided — the direction that errs toward not disabling anything.
+- Kept as a standing invariant rather than a one-shot migration, so it also holds for hand-edited files and shipped modpack presets.
+- `SyncAvailableVariants` clears the flag when the picked skin is uninstalled: falling back to vanilla is our decision, not the user's, and would otherwise read as an explicit "I want vanilla here" on the next boot.
+
+### Verification
+- **The gate**, simulated against a live install (18 skin mods, 6 characters, 4 with real picks). Fresh-install scenario: the old rule marks all **18** mods for disabling, the new rule marks **0** — the reported bug, gone. With the real config: candidates narrow 9 → 7, the two dropped being `Hcxmmx_Touhou_Sakuya_Skin` and `Ryoshu`, whose characters (`silent`, `ryoshu`) sit at an untouched `"default"` — correct. The three mods already disabled on that install (`ClymandSaru_jasmine_q`, `ClymandSaru_zhubao_q`, `regentSkin`) all still contradict explicit picks and correctly **stay** disabled, so the migration causes no churn and no re-conflict.
+- **The migration**, exercised directly against the compiled `SkinChoicesConfig` (10/10 assertions): a legacy non-default pick infers the flag while a placeholder `"default"` does not; a freshly seeded character is undecided; an explicit `"default"` pick survives save → load as *decided*; `false` is omitted from the JSON so the file shape is unchanged for anyone downgrading; and uninstalling the picked skin reverts the character to undecided.
+- Debug + Release build clean. **Not confirmed in a live game boot** — the gate and the repair path are covered by the simulation and the config tests above, but nothing here has been observed end-to-end in a running game, and reproducing the repair needs an install that was actually hit.
+
 ## [0.27.1] - 2026-07-22
 
 ### Added — drag the whole menu anywhere on the screen (⋮⋮ grip)

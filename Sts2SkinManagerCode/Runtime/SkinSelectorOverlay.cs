@@ -2479,7 +2479,13 @@ public static class SkinSelectorOverlay
             var choices = SkinChoicesConfig.LoadOrEmpty(_choicesPath);
             foreach (var kv in _pendingActiveByCharacter)
             {
-                if (choices.Characters.TryGetValue(kv.Key, out var c)) c.Active = kv.Value;
+                if (!choices.Characters.TryGetValue(kv.Key, out var c)) continue;
+                c.Active = kv.Value;
+                // This is the one path where a character's skin comes from the user rather than
+                // from a sync/placeholder, so it's where UserChosen is armed. It arms on "default"
+                // too — picking vanilla is a decision, and it's what lets MainFile disable a skin
+                // mod that loads ahead of us and would otherwise force itself on anyway.
+                c.UserChosen = true;
             }
             if (_pendingCardPacks != null) choices.CardPacks = ClonePacks(_pendingCardPacks);
             if (_pendingMixedAddons != null) choices.MixedAddons = ClonePacks(_pendingMixedAddons);

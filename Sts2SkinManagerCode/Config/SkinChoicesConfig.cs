@@ -15,6 +15,20 @@ public class CharacterSkinChoice
 
     [JsonPropertyName("available_variants")]
     public List<string> AvailableVariants { get; set; } = new();
+
+    // True once the USER has actually picked something for this character in the dropdown —
+    // including picking "default". Distinguishes an expressed "I want vanilla here" from the
+    // auto-created placeholder SyncAvailableVariants writes for every detected character, which
+    // also reads Active == "default" but means "not decided yet".
+    //
+    // Load-bearing: MainFile only auto-disables an early-loading skin mod when it contradicts a
+    // decision the user actually made. Without this flag a fresh install (every character at the
+    // placeholder "default") read as "the user wants vanilla everywhere" and disabled every skin
+    // mod installed before SkinManager. Omitted from the JSON while false, so old configs load as
+    // "undecided" — the safe direction (nothing gets auto-disabled until the user picks).
+    [JsonPropertyName("user_chosen")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool UserChosen { get; set; }
 }
 
 public class CardPacksConfig
@@ -176,6 +190,24 @@ public class SkinChoicesConfig
             root.Remove("_preview_visible"); // legacy v0.4.0-dev key, ignored
 
             cfg.Characters = JsonSerializer.Deserialize<Dictionary<string, CharacterSkinChoice>>(root.ToJsonString(), JsonOpts) ?? new(StringComparer.OrdinalIgnoreCase);
+
+            // Recover UserChosen for configs written before the flag existed. A non-default Active
+            // can ONLY have come from the dropdown — SyncAvailableVariants never writes anything but
+            // "default" — so it is proof of a user decision and the flag is safe to infer. Active ==
+            // "default" stays ambiguous (placeholder vs. an explicit "I want vanilla"), so it is left
+            // undecided: the direction that errs toward not auto-disabling anything.
+            //
+            // Kept as a standing invariant rather than a one-shot migration — it costs a pass over a
+            // handful of entries and holds for any file written by hand or shipped in a modpack preset.
+            foreach (var choice in cfg.Characters.Values)
+            {
+                if (choice.UserChosen) continue;
+                if (!string.IsNullOrEmpty(choice.Active)
+                    && !string.Equals(choice.Active, "default", StringComparison.OrdinalIgnoreCase))
+                {
+                    choice.UserChosen = true;
+                }
+            }
             return cfg;
         }
         catch
@@ -311,7 +343,11 @@ public class SkinChoicesConfig
         choice.AvailableVariants = list.Distinct().ToList();
         if (!choice.AvailableVariants.Contains(choice.Active))
         {
+            // The picked skin was uninstalled. Falling back to vanilla is our decision, not the
+            // user's, so the choice reverts to "undecided" — otherwise the next boot would read
+            // this as an explicit "I want vanilla" and start disabling early-loading skins.
             choice.Active = "default";
+            choice.UserChosen = false;
         }
     }
 
