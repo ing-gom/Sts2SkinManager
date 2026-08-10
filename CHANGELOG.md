@@ -4,6 +4,19 @@ All notable changes to Sts2SkinManager are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.27.3] - 2026-08-10
+
+### Fixed — a 19 MB gameplay mod was filed as a Regent skin, and its expansion took the game down with it
+- Reported on the Workshop page: **ARAM: Mayhem** (`HextechRunes`, Workshop 3747501308) showed up as `hextechrune` in the Regent dropdown, so picking any other Regent skin DLL-blocked it. Its expansion pack (`HextechRunesSponsorPack`) hard-references the base mod's assembly, so with the base blocked the game did not just lose a mod — it failed to launch, and the only way in was to disable the expansion.
+- Two independent faults had to line up, and both are fixed here.
+- **The mod was judged on a loader stub.** Multi-version packaging puts a thin loader at the mod's root `{modId}.dll` and the real implementation under `lib/<gameVersion>/{modId}.dll`; for this mod that is 25 KB of stub against 2.1 MB × 2 of payload. Every guard — Signal A (`EntityDefinitionDetector`, "defines content entities"), Signal B (`CosmeticUtilityDetector`) — resolved the mod to that one conventional path and read the stub, which defines nothing and references nothing. `CharacterIdSuggester` meanwhile walks the folder recursively and read the payload. The guards were looking at a different file than the heuristic they were supposed to overrule. All of them now inspect every assembly in the mod folder (`Discovery/ModAssemblySet.cs`), so a mod that defines 300+ relics is recognised as the content mod it is.
+- **A sound cue counted as an asset override.** The byte-frequency suggester scored `characters/{id}/` anywhere in the bytes at +5 as "literal asset override path = certain hit". `event:/sfx/characters/regent/regent_sovereign_blade` is an FMOD event path — any mod that plays a base-game character sound carries one — and that single literal is the whole margin: regent 28 against 12 for every other character, clearing both the score floor and the 2× dominance ratio. `sfx/characters/{id}/` occurrences are now subtracted before the path bonus applies. The same misread had been hand-patched around twice before (the Watcher port, `SoundReplacer` filed as a defect skin); it is fixed at the source now.
+- **Already-affected installs repair themselves.** `EntityBasedRescue` runs over existing `_dll_skin_assignments` at boot, and with Signal A now reading the real assemblies it demotes the stale `HextechRunes → regent` entry to `_dll_skin_skipped` on the next launch. Nobody has to hand-edit `skin_choices.json`; re-enable the expansion pack after one restart.
+
+### Verification
+- Reproduced against the installed Workshop copy of ARAM: Mayhem, and against a synthetic mod built to the same layout: pre-fix verdict `regent` (28 vs 12), post-fix ambiguous; Signal A `null` on the root stub, 1 entity across all assemblies.
+- Regression sweep over every mod installed on the dev machine (local `mods/` + Workshop): all seven real character-skin mods keep their exact pre-fix character verdict. The only rows that move are content and loader-bundle mods — ARAM: Mayhem (regent → none, Signal A now fires), RitsuLib and Sts2DebtLoan (Signal A now fires, both already excluded as framework/sister mods), ShinGetterMod (Signal A already fired, so its verdict change is inert).
+
 ## [0.27.2] - 2026-08-03
 
 ### Fixed — a fresh install disabled every skin mod the user already had

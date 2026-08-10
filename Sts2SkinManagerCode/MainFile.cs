@@ -687,8 +687,9 @@ public partial class MainFile : Node
         if (string.IsNullOrEmpty(modFolder)) return false;
         try
         {
-            var dll = System.IO.Path.Combine(modFolder, modId + ".dll");
-            if (System.IO.File.Exists(dll) && Discovery.EntityDefinitionDetector.InspectFile(modId, dll) != null)
+            // Every assembly in the folder, not just `{modId}.dll` — that file is a loader stub in
+            // multi-version packages and defines nothing (see Discovery/ModAssemblySet.cs).
+            if (Discovery.EntityDefinitionDetector.InspectMod(modId, Discovery.ModAssemblySet.ForFolder(modFolder)) != null)
                 return true;
         }
         catch { }

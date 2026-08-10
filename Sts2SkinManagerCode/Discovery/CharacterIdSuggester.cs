@@ -20,6 +20,7 @@ namespace Sts2SkinManager.Discovery;
 // Scoring (per base character id):
 //   pck:  +5 per "characters/{id}/" ASCII match  (literal asset override path = certain hit)
 //   dll:  +5 per "characters/{id}/" UTF-16 match (DLL ResourceLoader.Load with the path)
+//         — both exclude "sfx/characters/{id}/", which is an FMOD event path, not an asset override
 //   dll:  +3 per "{ID_UPPERCASE}"   UTF-16 match (CHARACTER.{X} enum constant in IL)
 //   dll:  +1 per "{id}"             UTF-16 match (any user-string reference)
 //
@@ -84,18 +85,35 @@ public static class CharacterIdSuggester
             var lc = charId.ToLowerInvariant();
             var uc = charId.ToUpperInvariant();
             var pathFragment = $"characters/{lc}/";
+            // FMOD event paths (`event:/sfx/characters/regent/regent_sovereign_blade`) embed the
+            // same fragment but say nothing about skinning — any mod that plays a base-game
+            // character sound carries one. Counting them as asset overrides is what mis-assigned
+            // the Watcher port to necrobinder and ARAM: Mayhem (HextechRunes) to regent, off a
+            // single sound cue. Subtract them out; each `sfx/…` occurrence contains exactly one
+            // path-fragment occurrence, and the two can't overlap, so the counts line up.
+            var audioFragment = $"sfx/{pathFragment}";
 
             // Asset-path matches are the strongest single signal. Pck files store paths in
             // ASCII; DLLs that load assets via ResourceLoader.Load("res://...") store the path
             // as UTF-16 in the user-string heap.
-            counts[charId] += 5 * CountSequence(bytes, Encoding.ASCII.GetBytes(pathFragment));
+            counts[charId] += 5 * AssetPathHits(bytes, Encoding.ASCII, pathFragment, audioFragment);
             if (isDll)
             {
-                counts[charId] += 5 * CountSequence(bytes, Encoding.Unicode.GetBytes(pathFragment));
+                counts[charId] += 5 * AssetPathHits(bytes, Encoding.Unicode, pathFragment, audioFragment);
                 counts[charId] += 3 * CountSequence(bytes, Encoding.Unicode.GetBytes(uc));
                 counts[charId] += 1 * CountSequence(bytes, Encoding.Unicode.GetBytes(lc));
             }
         }
+    }
+
+    // `characters/{id}/` occurrences that are genuine asset-override paths — i.e. every occurrence
+    // minus the ones sitting inside an FMOD `sfx/` event path. Never returns negative.
+    private static int AssetPathHits(byte[] bytes, Encoding encoding, string pathFragment, string audioFragment)
+    {
+        var all = CountSequence(bytes, encoding.GetBytes(pathFragment));
+        if (all == 0) return 0;
+        var audio = CountSequence(bytes, encoding.GetBytes(audioFragment));
+        return all > audio ? all - audio : 0;
     }
 
     // Naive O(N*M) byte sequence search. Fast enough for typical mod file sizes (under 100 MB

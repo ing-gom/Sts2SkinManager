@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Text;
 
@@ -30,6 +31,15 @@ public static class CosmeticUtilityDetector
     // never references these.
     private static readonly string[] ContentModelTokens = { "RelicModel", "PowerModel", "PotionModel" };
     private const int MinDistinctTokens = 2;
+
+    // Folder-level entry point — a mod is all of its assemblies. The conventional `{modId}.dll` is
+    // a loader stub in multi-version packages, and a stub references nothing; see [ModAssemblySet].
+    public static bool IsGlobalCosmeticMod(IEnumerable<string> dllPaths)
+    {
+        foreach (var dllPath in dllPaths)
+            if (IsGlobalCosmeticMod(dllPath)) return true;
+        return false;
+    }
 
     // True if the DLL at dllPath references >= MinDistinctTokens of the base content-model types,
     // i.e. it's a wholesale content/texture utility rather than a per-character skin.

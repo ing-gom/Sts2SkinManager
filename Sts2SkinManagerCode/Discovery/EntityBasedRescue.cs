@@ -61,14 +61,18 @@ public static class EntityBasedRescue
                 continue;
             }
 
-            var report = EntityDefinitionDetector.InspectFile(modId, dllPath);
+            // Judge the mod on every assembly it ships, not just `{modId}.dll` — that path is a
+            // loader stub in multi-version packages and would report no signal at all. See
+            // [ModAssemblySet].
+            var modFolder = Path.GetDirectoryName(dllPath)!;
+            var modAssemblies = ModAssemblySet.ForFolder(modFolder);
+            var report = EntityDefinitionDetector.InspectMod(modId, modAssemblies);
             // Signal B only fires when the mod has NO character identity — a themed skin that also
             // retextures relics/powers/potions still names its character, so HasCharacterSignal keeps
             // it managed. Only a content-model-referencing mod with zero character signal is a utility.
-            var modFolder = Path.GetDirectoryName(dllPath)!;
             var isCosmetic = report == null
                 && !HasCharacterSignal(modFolder, baseCharacters)
-                && CosmeticUtilityDetector.IsGlobalCosmeticMod(dllPath);
+                && CosmeticUtilityDetector.IsGlobalCosmeticMod(modAssemblies);
             // Signal C (custom character): the mod adds a brand-new character via ANY framework —
             // BaseLib dependency / CustomCharacterModel base class, OR (framework-agnostic) it ships
             // a char-select asset for a non-base id. A byte-frequency assignment to a base character
@@ -135,7 +139,7 @@ public static class EntityBasedRescue
     {
         var dllPath = HarmonyPatchInspector.FindModDllPath(modsDirs, modId);
         if (dllPath == null) return false;
-        var report = EntityDefinitionDetector.InspectFile(modId, dllPath);
+        var report = EntityDefinitionDetector.InspectMod(modId, ModAssemblySet.ForFolder(Path.GetDirectoryName(dllPath)));
         if (report == null) return false;
 
         choices.DllSkinSkipped.Add(modId);

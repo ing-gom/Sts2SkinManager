@@ -182,8 +182,8 @@ public static class DllSkinDetectionService
                 // types — relic/power/potion), auto-skip instead of prompting: it's not a per-
                 // character skin. A themed skin that also retextures content would have resolved a
                 // character above (suggested != null) and never reach here.
-                var dllPath = HarmonyPatchInspector.FindModDllPath(modsDirs, suspect.ModId);
-                if (dllPath != null && CosmeticUtilityDetector.IsGlobalCosmeticMod(dllPath))
+                var modAssemblies = ModAssemblySet.ForMod(modsDirs, suspect.ModId);
+                if (modAssemblies.Count > 0 && CosmeticUtilityDetector.IsGlobalCosmeticMod(modAssemblies))
                 {
                     choices.DllSkinSkipped.Add(suspect.ModId);
                     entityRescueDirty = true;

@@ -72,8 +72,7 @@ public static class UnifiedModBuilder
             var manifestPath = TryFindManifest(d.ModFolder);
             var (name, desc) = manifestPath != null ? ReadManifest(manifestPath) : ("", "");
 
-            var dllPath = HarmonyPatchInspector.FindModDllPath(modsDirs, d.ModId);
-            var definesEntities = dllPath != null && EntityDefinitionDetector.InspectFile(d.ModId, dllPath) != null;
+            var definesEntities = EntityDefinitionDetector.InspectMod(d.ModId, ModAssemblySet.ForMod(modsDirs, d.ModId)) != null;
 
             result.Add(new UnifiedModItem(
                 ModId: d.ModId,
@@ -106,8 +105,7 @@ public static class UnifiedModBuilder
             var manifestPath = modFolder != null ? TryFindManifest(modFolder) : null;
             var (name, desc) = manifestPath != null ? ReadManifest(manifestPath) : ("", "");
 
-            var dllPath = HarmonyPatchInspector.FindModDllPath(modsDirs, modId);
-            var definesEntities = dllPath != null && EntityDefinitionDetector.InspectFile(modId, dllPath) != null;
+            var definesEntities = EntityDefinitionDetector.InspectMod(modId, ModAssemblySet.ForMod(modsDirs, modId)) != null;
 
             result.Add(new UnifiedModItem(
                 ModId: modId,
@@ -138,7 +136,7 @@ public static class UnifiedModBuilder
             var manifestPath = TryFindManifest(modFolder);
             var (name, desc) = manifestPath != null ? ReadManifest(manifestPath) : ("", "");
 
-            var definesEntities = EntityDefinitionDetector.InspectFile(modId, dllPath) != null;
+            var definesEntities = EntityDefinitionDetector.InspectMod(modId, ModAssemblySet.ForFolder(modFolder)) != null;
 
             string? suggested = null;
             try { suggested = CharacterIdSuggester.Suggest(modFolder, baseCharacters); }
@@ -178,8 +176,7 @@ public static class UnifiedModBuilder
             var manifestPath = modFolder != null ? TryFindManifest(modFolder) : null;
             var (name, desc) = manifestPath != null ? ReadManifest(manifestPath) : ("", "");
 
-            var dllPath = HarmonyPatchInspector.FindModDllPath(modsDirs, modId);
-            var definesEntities = dllPath != null && EntityDefinitionDetector.InspectFile(modId, dllPath) != null;
+            var definesEntities = EntityDefinitionDetector.InspectMod(modId, ModAssemblySet.ForFolder(modFolder)) != null;
 
             blockedChar.TryGetValue(modId, out var ch);
             result.Add(new UnifiedModItem(

@@ -47,6 +47,27 @@ public static class EntityDefinitionDetector
         string? FirstEntityBaseName
     );
 
+    // Folder-level entry point: a mod is all of its assemblies, not just `{modId}.dll`. Multi-version
+    // packaging leaves a loader stub at that path with the real content under `lib/<gameVersion>/`,
+    // so inspecting the single conventional file reports "no entities" for a mod that defines
+    // hundreds. See [ModAssemblySet] for the packaging layout this exists for.
+    // Entities found across the mod's assemblies are merged into one report.
+    public static EntityDefinitionReport? InspectMod(string modId, IEnumerable<string> dllPaths)
+    {
+        List<string>? defined = null;
+        string? firstBase = null;
+        foreach (var dllPath in dllPaths)
+        {
+            var report = InspectFile(modId, dllPath);
+            if (report == null) continue;
+            defined ??= new List<string>();
+            foreach (var e in report.DefinedEntities)
+                if (!defined.Contains(e)) defined.Add(e);
+            firstBase ??= report.FirstEntityBaseName;
+        }
+        return defined == null ? null : new EntityDefinitionReport(modId, defined, firstBase);
+    }
+
     // Reads the DLL at dllPath via PEReader + MetadataReader. Returns null when the file isn't
     // a valid PE/.NET assembly or defines no content-entity subclasses.
     public static EntityDefinitionReport? InspectFile(string modId, string dllPath)
