@@ -4,6 +4,21 @@ All notable changes to Sts2SkinManager are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.27.4] - 2026-08-28
+
+### Fixed — a full Silent skin was filed as a card pack, and it held the body hostage
+- Reported on the Workshop page (Chinese): **劣人TV之角色MOD** (`LieRenTVmod`, Workshop 3787753911) was not recognised as a skin or a mixed mod but as a card-art mod. It could not be switched from the character dropdown, the only way to turn it off was the Card Skins tab, and — the part that actually hurt — **while it stayed on, Silent could not be switched to any other skin**.
+- The mod is a complete Silent reskin: body, char select, rest site, merchant, top-panel icon, multiplayer hands, plus ~130 card portraits. It scored **zero** on the one signal that assigns a character, `animations/characters/{char}/`, because it never writes there. It parks its spine in its own namespace (`res://LieRenTVmod/spine/silent/silent.skel`) and instead replaces the *shared* scene that aims at it, `res://scenes/creature_visuals/silent.tscn`. With no character id, the mod fell through to the card branch — which its 298 card-portrait hits matched — and mounted as `SkinModKind.Cards`.
+- All three complaints follow from that one classification. Cards-kind mods are absent from the character dropdown and from the mixed tab, so the Card Skins tab was the only surface left. And Cards-kind pcks are never handed to `ManagedPckRegistry`, so choosing a different Silent skin did not unmount this one: its shared `creature_visuals` override outlived the switch and kept pointing the body at its own private spine. The other skin mounted and had nothing to say about the body.
+- **A mod can own a body by owning the scene, not the spine.** `AssetDomainCatalog` now also reads character ids from the shared scenes that carry a body — `scenes/creature_visuals/{char}.tscn`, `scenes/rest_site/characters/{char}_rest_site`, `scenes/merchant/characters/{char}_merchant` — and `SkinModScanner` falls back to them when the spine regex finds nothing. `LieRenTVmod` is now `Character → [silent]` with `IsMixed`, which puts it in the Silent dropdown, in the mixed tab, under Skin Manager's mount control, and in reach of the "Vanilla cards / Mod cards" toggle.
+- **Char-select assets are deliberately excluded from this signal.** `char_select_bg_{char}` is a card pack's normal companion restyle (the TheDefectCardArtMod pattern); reading it as body ownership would reclassify every such pack as a character skin.
+- **Two guards keep the fallback from eating custom characters.** `scenes/creature_visuals/` also holds ~120 *monster* scenes, so only ids in the base player roster may promote a mod. And the existing custom-character checks run first: `ShinGetterMod` replaces `ironclad_merchant.tscn` while adding its own character, and promoting it to "Ironclad skin" would DLL-block that character whenever another Ironclad skin was active — the MzmChar failure mode.
+- **The body-priority row no longer reports itself inert.** `SpineOverrideMode` counted a body as present only when spine leaves were found, so a mod like this one reported `None` — telling the user the priority slider does nothing, when for a shared-path override it is the only thing deciding the body. Presence now covers the scene override too, and the boot log gained a `body_scene:{n}` field.
+
+### Verification
+- Replayed the real classification path (`AssetDomainCatalog.ScanPaths` + the scanner's decision) over every pck installed on the dev machine, local `mods/` and Workshop: **31 pcks, exactly one verdict moves** — `LieRenTVmod`, `Cards → Character [silent] +mixed`, label `body_scene:6 char_select:12 card_portraits:298 card_mode:Mixed body_mode:SharedPath`.
+- Nothing else shifts. The seven real skin mods keep their character verdicts (`ATA_IronClad`, `ATA_Silent`, `AncientWaifus`, `Mesugaki`, `regentSkin`, `ironcladSkin`, `Booba-Necrobinder-Mod`, `MuseDashSkin`, `raye`), and the two custom-character mods that touch shared body scenes — `ShinGetterMod` and `Ryoshu` — stay skipped.
+
 ## [0.27.3] - 2026-08-10
 
 ### Fixed — a 19 MB gameplay mod was filed as a Regent skin, and its expansion took the game down with it

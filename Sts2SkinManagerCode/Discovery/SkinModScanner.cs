@@ -102,6 +102,35 @@ public static class SkinModScanner
             // skippedCustomCharacterMods (auto-mount) instead of being mis-classified as a base skin.
             var introducesNonBaseChar = CustomCharacterFrameworkDetector.IntroducesNonBaseCharacter(scan.CharSelectIds, baseCharacters);
 
+            // Body-scene fallback. A skin can own a base character's body while scoring ZERO on the
+            // spine regex: it parks its spine in its own namespace (`res://LieRenTVmod/spine/silent/`)
+            // and replaces the shared scene that aims at it (`res://scenes/creature_visuals/silent.tscn`).
+            // Reported by a Chinese user on LieRenTVmod (劣人TV, Silent): the mod also ships ~130 Silent
+            // card portraits, so with no character id it fell straight through to the card branch and
+            // was mounted as SkinModKind.Cards. Three consequences, all of which they hit — it was
+            // missing from the character dropdown AND the mixed tab (only reachable from the Card Skins
+            // tab), and because Cards-kind pcks are never handed to ManagedPckRegistry, choosing any
+            // other Silent skin changed nothing: this pck's creature_visuals override outlived the
+            // switch and kept pointing the body at its own private spine.
+            //
+            // Guards, in order of what they protect:
+            //   - baseCharacters filter — `scenes/creature_visuals/` also holds ~120 MONSTER scenes,
+            //     so only ids in the player roster may promote a mod to a character skin.
+            //   - custom-character checks — ShinGetterMod replaces `ironclad_merchant.tscn` while
+            //     adding its own character; promoting it to "Ironclad skin" would DLL-block the new
+            //     character whenever another Ironclad skin is active (the MzmChar failure mode).
+            //   - chars.Count == 0 — a mod that ships real spine paths already has a better answer.
+            if (chars.Count == 0 && baseCharacters.Count > 0 && scan.HasBodyScene
+                && !scan.IsCustomCharacterMod && !introducesNonBaseChar)
+            {
+                var bodyChars = scan.BodySceneIds.Where(baseCharacters.Contains).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                if (bodyChars.Count > 0 && !CustomCharacterFrameworkDetector.IsCustomCharacterMod(modDir, pckId))
+                {
+                    MainFile.Logger.Info($"  [body-scene] {pckId} → [{string.Join(",", bodyChars.OrderBy(c => c))}] — owns the body via shared scene override, no animations/characters/ path.");
+                    chars = bodyChars;
+                }
+            }
+
             // ModId is the pck filename — same name in different subfolders would collide silently.
             // Keep the first occurrence, log + skip duplicates so the user can rename or dedupe.
             if (seenModIds.TryGetValue(pckId, out var firstPath))

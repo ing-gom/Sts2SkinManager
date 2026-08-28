@@ -165,6 +165,29 @@ public static class AssetDomainCatalog
         new(@"animations/character_select/([a-z][a-z0-9_]+)/", RegexOptions.IgnoreCase | RegexOptions.Compiled),
     };
 
+    // Character ids extracted from the SHARED scenes that position a character's body. A skin can
+    // own a base character's body without writing a single byte under `animations/characters/{char}/`:
+    // it keeps its own spine in its private namespace (`res://MyMod/spine/silent/silent.skel`) and
+    // instead replaces the base-owned scene that points at the spine. LieRenTVmod (劣人TV, Silent)
+    // is the canonical case — 0 hits on CharacterSpineRegex, yet it owns the Silent body outright
+    // because `res://scenes/creature_visuals/silent.tscn` is base-owned and last-mount-wins.
+    //
+    // Without this signal such a mod falls through to the card branch (its ~130 Silent card
+    // portraits match), gets classified SkinModKind.Cards, and three things break at once: it never
+    // reaches the character dropdown or the mixed tab, its pck is never handed to ManagedPckRegistry,
+    // and picking a different Silent skin does nothing — this mod's creature_visuals override
+    // survives and keeps aiming the body at its own private spine.
+    //
+    // Deliberately EXCLUDES char-select assets. `char_select_bg_{char}` is a card mod's normal
+    // companion restyle (TheDefectCardArtMod) — reading it as body ownership would reclassify every
+    // such card pack as a character skin. Only scenes that carry the in-world body count here.
+    private static readonly Regex[] BodySceneIdRegexes =
+    {
+        new(@"scenes/creature_visuals/([a-z][a-z0-9_]*)\.tscn", RegexOptions.IgnoreCase | RegexOptions.Compiled),
+        new(@"scenes/rest_site/characters/([a-z][a-z0-9_]*)_rest_site", RegexOptions.IgnoreCase | RegexOptions.Compiled),
+        new(@"scenes/merchant/characters/([a-z][a-z0-9_]*)_merchant", RegexOptions.IgnoreCase | RegexOptions.Compiled),
+    };
+
     // Generic char-select asset tokens that are layer/state names, never a character id. Guards the
     // capture groups above from treating `char_select_bg` / `..._locked` as a "new character".
     private static readonly HashSet<string> CharSelectIdStopwords = new(StringComparer.OrdinalIgnoreCase)
@@ -196,6 +219,8 @@ public static class AssetDomainCatalog
         int CharSelectAssetHits,
         int EventArtHits,
         IReadOnlySet<string> CharSelectIds,
+        IReadOnlySet<string> BodySceneIds,
+        int BodySceneHits = 0,
         int SharedCardPathHits = 0,
         int ModPrivateCardPathHits = 0,
         int SharedSpinePathHits = 0,
@@ -208,13 +233,24 @@ public static class AssetDomainCatalog
         public bool HasCharSelectAsset => CharSelectAssetHits > 0;
         public bool IsEventArtMod => EventArtHits > 0;
 
+        // True when the pck replaces any shared body scene — including monster scenes, so this alone
+        // says nothing about WHICH character. Callers must intersect BodySceneIds with the base
+        // player roster: `scenes/creature_visuals/` holds all ~120 monsters too.
+        public bool HasBodyScene => BodySceneHits > 0;
+
         // Mixed means the mod writes some assets to a shared path and some to its own namespace, so
         // priority moves part of them and not the rest. Reported honestly rather than rounded to one
         // of the two — a half-working slider is exactly the case users report as "sometimes it does
         // nothing". Both fall back to SharedPath when the domain was detected but no root parsed,
         // which is the pre-existing last-mount-wins assumption.
         public AssetOverrideMode CardOverrideMode => ResolveMode(IsCardMod, SharedCardPathHits, ModPrivateCardPathHits);
-        public AssetOverrideMode SpineOverrideMode => ResolveMode(CharacterSpineHits > 0, SharedSpinePathHits, ModPrivateSpinePathHits);
+        // "Present" spans both ways a mod can own a body: the spine leaves themselves, and the
+        // shared scene that positions them. A LieRenTVmod-style pck scores 0 spine leaves yet still
+        // has a body to arbitrate, and reporting None there would tell the user their priority
+        // slider is inert when it is in fact the only thing deciding the body.
+        public AssetOverrideMode SpineOverrideMode => ResolveMode(
+            CharacterSpineHits > 0 || SharedSpinePathHits > 0 || ModPrivateSpinePathHits > 0,
+            SharedSpinePathHits, ModPrivateSpinePathHits);
 
         // Compact one-line summary for boot log — only non-zero domains appear, so the line
         // stays short for mods that only touch one or two categories.
@@ -222,13 +258,14 @@ public static class AssetDomainCatalog
         {
             var parts = new List<string>(6);
             if (CharacterSpineHits > 0) parts.Add($"spine:{CharacterSpineHits}");
+            if (BodySceneHits > 0) parts.Add($"body_scene:{BodySceneHits}");
             if (CharSelectAssetHits > 0) parts.Add($"char_select:{CharSelectAssetHits}");
             if (CardArtHits > 0) parts.Add($"card_art:{CardArtHits}");
             if (CardPortraitsHits > 0) parts.Add($"card_portraits:{CardPortraitsHits}");
             // Surfaced in the boot log so a "priority does nothing" report can be triaged from the
             // user's log alone, without needing their pcks.
             if (IsCardMod) parts.Add($"card_mode:{CardOverrideMode}");
-            if (CharacterSpineHits > 0) parts.Add($"body_mode:{SpineOverrideMode}");
+            if (SpineOverrideMode != AssetOverrideMode.None) parts.Add($"body_mode:{SpineOverrideMode}");
             if (EventArtHits > 0) parts.Add($"event_art:{EventArtHits}");
             if (CustomCharacterIndicatorHits > 0) parts.Add($"custom_char:{CustomCharacterIndicatorHits}");
             return parts.Count == 0 ? "(no recognized domain)" : string.Join(" ", parts);
@@ -246,7 +283,8 @@ public static class AssetDomainCatalog
     {
         var chars = new HashSet<string>();
         var charSelectIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        int spineHits = 0, cardArtHits = 0, cardPortraitsHits = 0, customCharHits = 0, charSelectHits = 0, eventArtHits = 0;
+        var bodySceneIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        int spineHits = 0, cardArtHits = 0, cardPortraitsHits = 0, customCharHits = 0, charSelectHits = 0, eventArtHits = 0, bodySceneHits = 0;
         int sharedCardHits = 0, privateCardHits = 0, sharedSpineHits = 0, privateSpineHits = 0;
 
         foreach (var p in paths)
@@ -285,8 +323,19 @@ public static class AssetDomainCatalog
                 var id = cm.Groups[1].Value.ToLowerInvariant();
                 if (!CharSelectIdStopwords.Contains(id)) charSelectIds.Add(id);
             }
+            // Matches (not Match): a single ASCII run can list several scene paths inline, and a
+            // mod that reskins the body usually replaces the combat, rest-site and merchant scenes
+            // together — we want all three ids, not just the first.
+            foreach (var rx in BodySceneIdRegexes)
+            {
+                foreach (Match bm in rx.Matches(p))
+                {
+                    bodySceneIds.Add(bm.Groups[1].Value.ToLowerInvariant());
+                    bodySceneHits++;
+                }
+            }
         }
 
-        return new PathScan(chars, spineHits, cardArtHits, cardPortraitsHits, customCharHits, charSelectHits, eventArtHits, charSelectIds, sharedCardHits, privateCardHits, sharedSpineHits, privateSpineHits);
+        return new PathScan(chars, spineHits, cardArtHits, cardPortraitsHits, customCharHits, charSelectHits, eventArtHits, charSelectIds, bodySceneIds, bodySceneHits, sharedCardHits, privateCardHits, sharedSpineHits, privateSpineHits);
     }
 }
