@@ -4,6 +4,21 @@ All notable changes to Sts2SkinManager are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.27.5] - 2026-09-27
+
+### Fixed — suppressing a skin another mod builds on left the game on the mod-error screen
+- Reported on the Workshop page (Chinese): *"strangely, loading this mod on its own makes the game error out and I can't get in, but loading it together with another skin-switcher mod lets me in"*. Nothing about Skin Manager's own start-up is conditional on other mods — what changes with the other mod installed is **which skins end up suppressed**.
+- Skin Manager suppresses a skin that is not the active pick in two ways, and STS2's loader reads **both** as "this mod did not load": the `TryLoadMod` intercept (`mod.state = Disabled`, the DLL never loads) and the load-order resolver (`is_enabled=false` in `settings.save`, stripped before any mod loads). `ModManager` then validates every mod's declared dependencies against `dependency.state == Loaded` and, on a miss, adds `MOD_ERROR.MISSING_DEPENDENCY`, sets the **dependent** to `Failed` and shows the mod-error screen. So suppressing one cosmetic skin could take down an unrelated mod that builds on it — and the player just sees a game that will not start.
+- The existing guard only asked whether the *target itself* was a content or framework mod (`IsContentOrFrameworkMod`, added in 0.27.3 after ARAM: Mayhem). Nobody asked **who depends on the target**. A skin is a perfectly legitimate dependency: the author's own install has `STS2-OrchisNecrobinderSkinFix`, which declares the necrobinder skin `OrchisNecrobinderSkinMod` — a mod the boot log shows being `[dll-block]`ed whenever another necrobinder skin is picked.
+- New `Discovery/ModDependencyIndex.cs` reads every installed manifest (local `mods/` **and** Workshop) and builds the reverse map "who declares X as a dependency". Both suppression paths now consult it: a skin with dependents keeps its DLL loaded and is never disabled in `settings.save`. Only the DLL — its pck stays managed, so the dropdown still switches bodies. What is given up is suppressing that one skin's Harmony patches: a cosmetic leak, against a game that would not boot.
+- **Installs already broken repair themselves.** The load-order auto-heal now re-enables any skin we had disabled that another installed mod depends on, even when it still contradicts the user's pick — an unbootable game outranks a skin applying where it should not. One restart, and the usual "your mods were handed back" modal.
+- Manifests are read as `JsonDocument`, not `JsonNode`, and every property access sits inside the same try: one installed mod (`CustomCardTextureLoaderSG`) declares `dependencies` twice, which `JsonNode` accepts at parse time and then throws on at the first indexer access — an exception that would have escaped into `Run`'s catch-all and taken the entire mod down to "init failed". Both copies of a duplicated key are read, since for a guard a missed edge is a broken boot while a spare edge merely leaves one skin loaded.
+
+### Verification
+- The index run against the dev machine's real install (local `mods/` + Workshop, 109 manifests): **19 dependency edges in 43 ms**, including the case this fixes — `OrchisNecrobinderSkinMod ← STS2-OrchisNecrobinderSkinFix` — plus the framework edges (`BaseLib`, `STS2-RitsuLib`, `FGOCore`, `ModConfig`, `Sts2ModTranslator`). Lookups are case-insensitive; unknown and empty ids return empty.
+- The duplicate-key manifest is the regression case for the parser change: with `JsonNode` the scan threw `ArgumentException: An item with the same key has already been added. Key: dependencies`; with `JsonDocument` it yields its edge (`ModConfig ← CustomCardTextureLoaderSG`).
+- Boot log on the real game: `OrchisNecrobinderSkinMod` moves from `[dll-block]` to `[dll-keep] … declared as a dependency by [STS2-OrchisNecrobinderSkinFix]`, and every other blocked skin is unchanged.
+
 ## [0.27.4] - 2026-08-28
 
 ### Fixed — a full Silent skin was filed as a card pack, and it held the body hostage

@@ -387,16 +387,33 @@ public partial class MainFile : Node
         // Vanilla-cards mods keep their DLL/pck loaded so their body stays; the card art is reverted
         // by a card overlay mounted below.
         foreach (var modId in choices.VanillaCardsMods) keepDllModIds.Add(modId);
+        // Reverse-dependency guard. A blocked mod is "not loaded" as far as STS2's loader is
+        // concerned, so every mod that declares it as a dependency fails with
+        // MOD_ERROR.MISSING_DEPENDENCY and the player lands on the mod-error screen instead of the
+        // menu (details in Discovery/ModDependencyIndex.cs). A skin with dependents therefore keeps
+        // its DLL. Only the DLL — its pck stays managed, so the dropdown still switches bodies; all
+        // we give up is suppressing whatever Harmony patches that skin registers, which is a
+        // cosmetic leak rather than an unbootable game.
+        var dependencyIndex = ModDependencyIndex.Build(modRoots);
+        if (dependencyIndex.EdgeCount > 0)
+            Logger.Info($"dependency index: {dependencyIndex.EdgeCount} declared dependency edge(s) among installed mods.");
+
         foreach (var d in characterMods)
         {
-            if (!keepDllModIds.Contains(d.ModId))
+            if (keepDllModIds.Contains(d.ModId)) continue;
+
+            var dependents = dependencyIndex.DependentsOf(d.ModId);
+            if (dependents.Count > 0)
             {
-                ManagedDllRegistry.Manage(d.ModId);
-                Logger.Info($"  [dll-block] {d.ModId}");
+                Logger.Warn($"  [dll-keep] {d.ModId} — declared as a dependency by [{string.Join(", ", dependents)}]; leaving its DLL loaded (blocking it would fail them at boot with MOD_ERROR.MISSING_DEPENDENCY).");
+                continue;
             }
+
+            ManagedDllRegistry.Manage(d.ModId);
+            Logger.Info($"  [dll-block] {d.ModId}");
         }
 
-        ApplyLoadOrderBootstrap(settings, characterMods, keepDllModIds, choices, choicesPath, managerDataDir);
+        ApplyLoadOrderBootstrap(settings, characterMods, keepDllModIds, choices, choicesPath, managerDataDir, dependencyIndex);
 
         if (settings != null && cardMods.Count > 0)
         {
@@ -513,15 +530,19 @@ public partial class MainFile : Node
     //     via is_enabled=false. The game strips disabled mods before any mod loads, so the conflict
     //     ends deterministically in one restart with no mod_list reordering.
     //  3. Auto-heal: if the user later picks a skin we'd disabled (it's now a "keep"), re-enable it;
-    //     re-enable anything disabled without a user decision behind it; drop entries whose mod is
-    //     gone.
+    //     re-enable anything disabled without a user decision behind it, or that another installed
+    //     mod depends on; drop entries whose mod is gone.
+    //  4. Never disable a mod another installed mod declares as a dependency — the game reports
+    //     MOD_ERROR.MISSING_DEPENDENCY for the dependent and shows a mod-error screen at boot.
+    //     Same guard as the dll-block loop in Run(); see Discovery/ModDependencyIndex.cs.
     private static void ApplyLoadOrderBootstrap(
         Sts2SettingsFile? settings,
         List<DetectedSkinMod> characterMods,
         HashSet<string> keepDllModIds,
         SkinChoicesConfig choices,
         string choicesPath,
-        string managerDataDir)
+        string managerDataDir,
+        ModDependencyIndex dependencyIndex)
     {
         if (settings == null) return;
 
@@ -576,6 +597,18 @@ public partial class MainFile : Node
             {
                 choices.LoadOrderResolvedByDisable.Remove(id); // mod gone; nothing to re-enable.
             }
+            else if (dependencyIndex.DependentsOf(id).Count > 0)
+            {
+                // Retroactive repair for the boot-breaking case: we disabled this skin while
+                // another installed mod declares it as a dependency, so every boot since has failed
+                // that dependent with MOD_ERROR.MISSING_DEPENDENCY — for the user, "the game won't
+                // start". Hand it back unconditionally (even when it still contradicts a pick: a
+                // skin applying where it shouldn't is a cosmetic problem, an unbootable game is
+                // not). The disable loop below refuses to re-disable it.
+                enableChanges[id] = true;
+                choices.LoadOrderResolvedByDisable.Remove(id);
+                restoredMods.Add(id);
+            }
             else if (modById.TryGetValue(id, out var d) && !ConflictsWithUserChoice(d))
             {
                 // Retroactive repair for anyone already hit by the old rule: this mod was disabled
@@ -625,6 +658,7 @@ public partial class MainFile : Node
 
         var disabledForConflict = new List<string>();
         var skippedContentTargets = new List<string>();
+        var skippedDependedTargets = new List<string>();
         foreach (var id in targetsAhead)
         {
             if (IsContentOrFrameworkMod(id, folderById.TryGetValue(id, out var f) ? f : null))
@@ -632,6 +666,17 @@ public partial class MainFile : Node
                 skippedContentTargets.Add(id);
                 continue;
             }
+
+            // Second hard guard, the mirror of the one in Run()'s dll-block loop: is_enabled=false
+            // strips the mod before any mod loads, which reads to the loader exactly like the mod
+            // being absent — and strands every dependent on the mod-error screen.
+            var dependents = dependencyIndex.DependentsOf(id);
+            if (dependents.Count > 0)
+            {
+                skippedDependedTargets.Add($"{id} ← [{string.Join(", ", dependents)}]");
+                continue;
+            }
+
             enableChanges[id] = false;
             choices.LoadOrderResolvedByDisable.Add(id);
             disabledForConflict.Add(id);
@@ -653,6 +698,11 @@ public partial class MainFile : Node
         if (skippedContentTargets.Count > 0)
         {
             Logger.Warn($"load-order: {skippedContentTargets.Count} early-loading target(s) define content / are framework mods — left loaded (not disabled) to protect their data: [{string.Join(",", skippedContentTargets)}].");
+        }
+
+        if (skippedDependedTargets.Count > 0)
+        {
+            Logger.Warn($"load-order: {skippedDependedTargets.Count} early-loading target(s) are declared as a dependency by another installed mod — left enabled (not disabled) so the dependent still loads: [{string.Join("; ", skippedDependedTargets)}].");
         }
 
         // Restart prompts (auto-restart with a "restart later" option):
