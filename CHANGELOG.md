@@ -4,6 +4,12 @@ All notable changes to Sts2SkinManager are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.27.7] - 2026-11-16
+
+### Fixed — every patch was applied twice
+- The pinned `external/Sts2.ModKit` submodule sits inside the project directory, so the SDK's default `**/*.cs` glob compiled its sources into this DLL too — including the kit's template mod, whose `[ModInitializer] ModName.MainFile` made the game run a second `ModBootstrap.Run("ModName", <this assembly>)` and patch every class again under another Harmony id (boot log: `Calling initializer method of type ModName.MainFile for Sts2SkinManager`). The csproj now excludes `external/**`; the kit's code still comes from its ProjectReference. DLL 357 KB → 324 KB.
+- Verified on v0.113.1: the `ModName.MainFile` initializer is gone from the boot log, `Harmony patches applied: 5 classes ok, 0 failed`.
+
 ## [0.27.6] - 2026-11-16
 
 ### Fixed — the whole mod did nothing on the public-beta branch (v0.113)

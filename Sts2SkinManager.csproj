@@ -16,4 +16,11 @@
     <Target Name="CheckSts2ModKit" BeforeTargets="PrepareForBuild" Condition="'$(Sts2ModKitImported)' != 'true'">
         <Error Text="Sts2.ModKit not found. This repository pins it as a submodule: run 'git submodule update --init --recursive' and build again." />
     </Target>
+    <!-- The pinned ModKit submodule sits inside this project directory, so the SDK's default **/*.cs
+         glob compiled its sources too — including the template mod's [ModInitializer] MainFile, which
+         made the game run a second ModBootstrap.Run("ModName", <this assembly>) and patch every class
+         twice. The kit's code comes from the ProjectReference; keep the glob out of external/. -->
+    <ItemGroup>
+        <Compile Remove="external\**" />
+    </ItemGroup>
 </Project>
