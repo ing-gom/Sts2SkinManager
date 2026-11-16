@@ -4,6 +4,19 @@ All notable changes to Sts2SkinManager are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.27.6] - 2026-11-16
+
+### Fixed — the whole mod did nothing on the public-beta branch (v0.113)
+- Reported on the Workshop page (Chinese, several users): *"stopped working in the beta"*, *"can't detect the Fool's skins"*.
+- v0.113 changed `NCharacterSelectScreen.SelectCharacter(NCharacterSelectButton, CharacterModel)` to `SelectCharacter(NCharacterSelectButton)`. Our postfix asked Harmony for the `characterModel` argument by name, so `PatchAll` threw while patching it — and because `PatchAll` aborts on the first failure, `Initialize` never reached `Run()`. Boot log: `init failed: HarmonyLib.HarmonyException: Patching exception in method … SelectCharacter(NCharacterSelectButton charSelectButton)`. No scan, no dropdown, no pck management.
+- The postfix now takes the button and reads `charSelectButton.Character` — the exact value every build passes as the model — so it binds on both branches.
+- Patches are now applied class by class: a single drifted target on a future game update disables only that feature and logs `patch class X failed`, instead of silently taking the whole mod down.
+- The beta's new character **Fool** is recognised by the DLL-skin detector (`Characters.Fool`) and the manifest hinter (`fool` / `愚者` / `フール`). Pck-based skins were already picked up from the base game's roster, which is read from the game's own files.
+
+### Verification
+- Beta v0.113.1, real boot: shipped 0.27.5 → `init failed` (above). 0.27.6 → `Harmony patches applied: 5 classes ok, 0 failed`, `base character roster (6): [defect, fool, ironclad, necrobinder, regent, silent]`.
+- Every game member the DLL references resolves against both the v0.113.1 and the v0.107.1 `sts2.dll` (MemberRef comparison, 33 refs, 0 missing).
+
 ## [0.27.5] - 2026-09-27
 
 ### Fixed — suppressing a skin another mod builds on left the game on the mod-error screen

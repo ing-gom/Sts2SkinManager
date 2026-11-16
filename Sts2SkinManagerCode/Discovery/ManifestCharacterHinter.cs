@@ -30,6 +30,8 @@ public static class ManifestCharacterHinter
         ["necrobinder"] = new[] { "necrobinder", "缚灵者", "縛霊者", "ネクロバインダー", "네크로바인더" },
         ["regent"] = new[] { "regent", "储君", "儲君", "屑国王", "リージェント", "리젠트" },
         ["silent"] = new[] { "silent", "静默猎手", "靜默獵手", "静默", "サイレント", "사일런트" },
+        // v0.113 beta character. Korean title is "풀" — too generic a substring (grass, 풀다…), so omitted.
+        ["fool"] = new[] { "fool", "愚者", "フール" },
     };
 
     public static string? Suggest(string modFolder, IReadOnlySet<string> baseCharacters)

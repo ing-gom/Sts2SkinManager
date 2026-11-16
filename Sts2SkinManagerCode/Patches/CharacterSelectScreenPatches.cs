@@ -22,13 +22,18 @@ public static class CharacterSelectScreenReadyPatch
     }
 }
 
+// Bind to the button, not the model: v0.113 dropped the `CharacterModel characterModel` parameter
+// (SelectCharacter(btn, model) → SelectCharacter(btn)). Harmony resolves postfix args by NAME, so
+// asking for `characterModel` threw inside PatchAll on the new branch and took the whole mod down.
+// Every build passes the button's own `Character` as the model, so reading it here is equivalent.
 [HarmonyPatch(typeof(NCharacterSelectScreen), "SelectCharacter")]
 public static class CharacterSelectScreenSelectPatch
 {
-    public static void Postfix(CharacterModel characterModel)
+    public static void Postfix(NCharacterSelectButton charSelectButton)
     {
         try
         {
+            CharacterModel? characterModel = charSelectButton?.Character;
             var id = characterModel?.Id?.Entry;
             if (string.IsNullOrEmpty(id)) return;
             SkinSelectorOverlay.OnCharacterSelected(id);

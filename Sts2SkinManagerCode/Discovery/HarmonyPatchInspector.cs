@@ -38,6 +38,7 @@ public static class HarmonyPatchInspector
         "MegaCrit.Sts2.Core.Models.Characters.Necrobinder",
         "MegaCrit.Sts2.Core.Models.Characters.Regent",
         "MegaCrit.Sts2.Core.Models.Characters.Silent",
+        "MegaCrit.Sts2.Core.Models.Characters.Fool", // v0.113 beta; harmless string on older builds
         "MegaCrit.Sts2.Core.Nodes.Combat.NCreatureVisuals",
         "MegaCrit.Sts2.Core.Nodes.Screens.CharacterSelect.NCharacterSelectButton",
         "MegaCrit.Sts2.Core.Nodes.Screens.CharacterSelect.NCharacterSelectScreen",
@@ -58,6 +59,7 @@ public static class HarmonyPatchInspector
         ["MegaCrit.Sts2.Core.Models.Characters.Necrobinder"] = "necrobinder",
         ["MegaCrit.Sts2.Core.Models.Characters.Regent"] = "regent",
         ["MegaCrit.Sts2.Core.Models.Characters.Silent"] = "silent",
+        ["MegaCrit.Sts2.Core.Models.Characters.Fool"] = "fool",
     };
 
     // Known non-skin mods that legitimately patch character-select / character-model types for

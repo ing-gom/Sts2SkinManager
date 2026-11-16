@@ -34,9 +34,29 @@ public partial class MainFile : Node
 
     private static void ApplyHarmonyPatches()
     {
+        // Patch class by class instead of PatchAll: one target drifting on a new game branch (renamed
+        // parameter, changed return type) must cost only that feature, not abort Initialize before
+        // Run() — which is what silently disabled the whole mod on beta v0.113.
         var harmony = new Harmony(ModId);
-        harmony.PatchAll(typeof(MainFile).Assembly);
-        Logger.Info("Harmony patches applied.");
+        int ok = 0, failed = 0;
+        foreach (var type in AccessTools.GetTypesFromAssembly(typeof(MainFile).Assembly))
+        {
+            if (!type.GetCustomAttributes(typeof(HarmonyPatch), true).Any()
+                && !type.GetMethods(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)
+                        .Any(m => m.GetCustomAttributes(typeof(HarmonyPatch), true).Any()))
+                continue;
+            try
+            {
+                harmony.CreateClassProcessor(type).Patch();
+                ok++;
+            }
+            catch (Exception ex)
+            {
+                failed++;
+                Logger.Warn($"patch class {type.Name} failed (feature disabled, rest continues): {ex.GetBaseException().Message}");
+            }
+        }
+        Logger.Info($"Harmony patches applied: {ok} classes ok, {failed} failed.");
     }
 
     // Given a workshop mod folder STS2 resolved via Steam
